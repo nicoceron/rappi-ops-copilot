@@ -19,7 +19,11 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from ops_copilot import __version__
 from ops_copilot.data_loader import load_workbook
-from ops_copilot.insights import InsightReport, generate_executive_insight_report
+from ops_copilot.insights import (
+    InsightReport,
+    generate_executive_insight_report,
+    render_report_html,
+)
 from ops_copilot.models import QueryResult, SemanticQuery
 from ops_copilot.postgres_loader import ensure_postgres_loaded
 from ops_copilot.query_engine import QueryEngine, QueryValidationError
@@ -190,6 +194,18 @@ def latest_insights_markdown() -> Response:
     )
 
 
+@app.get("/insights/latest.html")
+def latest_insights_html() -> Response:
+    report = latest_insights()
+    return Response(
+        content=render_report_html(report),
+        media_type="text/html",
+        headers={
+            "Content-Disposition": f'inline; filename="{report.report_id}-executive-insights.html"'
+        },
+    )
+
+
 @app.get("/exports/{query_id}.csv")
 def export_csv(query_id: str) -> Response:
     result = _cached_result(query_id)
@@ -312,6 +328,10 @@ def _write_insight_report_files(report: InsightReport) -> None:
     directory = export_dir() / "reports"
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "latest-executive-insights.md").write_text(report.markdown, encoding="utf-8")
+    (directory / "latest-executive-insights.html").write_text(
+        render_report_html(report),
+        encoding="utf-8",
+    )
     (directory / "latest-executive-insights.json").write_text(
         report.model_dump_json(indent=2),
         encoding="utf-8",

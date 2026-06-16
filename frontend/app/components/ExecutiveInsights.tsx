@@ -12,39 +12,10 @@ import {
   Target,
   TrendingDown,
 } from "lucide-react";
+import { InsightReportCharts } from "./InsightReportCharts";
+import type { CategoryKey, InsightReport } from "./insightTypes";
 
 const DEFAULT_API_URL = "http://localhost:8000";
-
-type CategoryKey =
-  | "anomalies"
-  | "worrying_trends"
-  | "benchmarking"
-  | "correlations"
-  | "opportunities";
-
-type Finding = {
-  id: string;
-  category: CategoryKey;
-  severity: "critical" | "high" | "medium" | "low";
-  title: string;
-  summary: string;
-  recommendation: string;
-};
-
-type InsightCategory = {
-  key: CategoryKey;
-  title: string;
-  findings: Finding[];
-};
-
-type InsightReport = {
-  report_id: string;
-  generated_at: string;
-  source: string;
-  period_label: string;
-  executive_summary: Finding[];
-  categories: InsightCategory[];
-};
 
 const categoryIcons = {
   anomalies: AlertTriangle,
@@ -134,6 +105,11 @@ export function ExecutiveInsights() {
             Markdown
             <ArrowUpRight size={14} />
           </a>
+          <a href={`${apiBase}/insights/latest.html`} target="_blank" rel="noreferrer">
+            <FileText size={16} />
+            HTML
+            <ArrowUpRight size={14} />
+          </a>
         </div>
       </div>
 
@@ -142,12 +118,14 @@ export function ExecutiveInsights() {
       ) : error ? (
         <div className="report-state report-error">{error}</div>
       ) : report ? (
-        <>
+        <div className="report-scroll">
           <div className="report-meta">
             <span>{formatGeneratedAt(report.generated_at)}</span>
             <span>{report.source}</span>
             <span>{report.period_label}</span>
           </div>
+
+          <InsightReportCharts report={report} />
 
           <div className="summary-strip">
             {report.executive_summary.slice(0, 5).map((finding) => (
@@ -187,7 +165,7 @@ export function ExecutiveInsights() {
               );
             })}
           </div>
-        </>
+        </div>
       ) : (
         <div className="report-state">No report available.</div>
       )}
