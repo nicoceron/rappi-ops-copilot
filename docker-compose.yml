@@ -55,6 +55,7 @@ services:
     build:
       context: ./frontend
     environment:
+      NEXT_PUBLIC_OPS_API_URL: ${NEXT_PUBLIC_OPS_API_URL:-http://localhost:8000}
       NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL: ${NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL:-http://localhost:5678/webhook/b2a0878f-58c7-4f89-a98b-2dc29cd637a8/chat}
     ports:
       - "${WEB_APP_PORT:-3000}:3000"

@@ -1,7 +1,7 @@
 # n8n Workflows
 
-Import `rappi_ops_chat_agent.json` into n8n after starting the local stack, or
-run this from the repository root to import the workflow and credentials:
+Import the workflow JSON files into n8n after starting the local stack, or run
+this from the repository root to import the workflows and credentials:
 
 ```bash
 python3 scripts/setup_n8n.py --activate
@@ -16,7 +16,7 @@ python3 scripts/setup_n8n.py --activate
 ## Required n8n Credentials
 
 `scripts/setup_n8n.py` creates or updates these credentials from `.env`.
-If importing manually, create them in n8n after import:
+If importing the chat agent manually, create them in n8n after import:
 
 - `DeepSeek account`: DeepSeek API credential with your API key.
 - `Rappi Ops Postgres`: Postgres credential pointing to the `postgres` service.
@@ -28,6 +28,16 @@ For the Docker Compose defaults:
 - Database: `rappi_ops`
 - User: `rappi`
 - Password: `rappi`
+
+## Workflows
+
+- `rappi_ops_chat_agent.json`: public Chat Trigger plus DeepSeek agent tools.
+- `rappi_ops_automatic_insights.json`: Manual Trigger plus Schedule Trigger
+  that calls `POST http://ops-api:8000/insights/generate`.
+
+The automatic insights workflow is scheduled for Monday 07:00 in
+`America/Bogota`. It persists the latest report through the Ops API; the Next.js
+app displays `/insights/latest` and links to `/insights/latest.md`.
 
 ## Notes
 

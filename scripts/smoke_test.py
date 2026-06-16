@@ -9,6 +9,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from ops_copilot.data_loader import load_workbook
+from ops_copilot.insights import generate_executive_insight_report
 from ops_copilot.models import SemanticQuery
 from ops_copilot.query_engine import QueryEngine
 from ops_copilot.settings import default_data_file
@@ -109,6 +110,23 @@ def main() -> None:
         if result.row_count < 1:
             raise SystemExit(f"{name}: expected at least one row")
         print(f"ok {name}: {result.row_count} rows ({result.answer_type})")
+
+    report = generate_executive_insight_report(engine.dataset, source="smoke_test")
+    category_counts = {category.key: len(category.findings) for category in report.categories}
+    expected_categories = {
+        "anomalies",
+        "worrying_trends",
+        "benchmarking",
+        "correlations",
+        "opportunities",
+    }
+    if set(category_counts) != expected_categories:
+        raise SystemExit(f"insights: unexpected categories {sorted(category_counts)}")
+    if not report.executive_summary:
+        raise SystemExit("insights: expected executive summary findings")
+    if "# Rappi Ops Executive Insight Report" not in report.markdown:
+        raise SystemExit("insights: expected markdown output")
+    print(f"ok automatic insights: {category_counts}")
 
 
 if __name__ == "__main__":

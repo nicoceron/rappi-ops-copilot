@@ -10,7 +10,7 @@ The project uses n8n orchestration, DeepSeek `deepseek-v4-pro`, and model-genera
 - `docs/n8n-rappi-ops-copilot-design.md`: architecture and workflow design for the n8n chatbot.
 - `frontend/`: Next.js embedded chat UI for the n8n Chat Trigger.
 - `ops_copilot/`: analytics API, workbook loader, Postgres loader, and SQL execution guardrails.
-- `workflows/`: n8n importable chat-agent workflow template.
+- `workflows/`: n8n importable chat-agent and automatic insight-report workflows.
 - `db/schema.sql`: Postgres semantic schema.
 - `scripts/`: ingestion and smoke-test scripts.
 
@@ -46,9 +46,10 @@ Import:
 python3 scripts/setup_n8n.py --activate
 ```
 
-This imports or updates the n8n credentials and workflow from `.env` without
+This imports or updates the n8n credentials and workflows from `.env` without
 committing secrets. You can also import `workflows/rappi_ops_chat_agent.json`
-manually and create the credentials described in `workflows/README.md`.
+and `workflows/rappi_ops_automatic_insights.json` manually and create the
+credentials described in `workflows/README.md`.
 
 The web UI embeds the workflow's public Chat Trigger through
 `NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL`. The local default points to the committed
@@ -71,6 +72,21 @@ Schema:
 ```bash
 curl http://localhost:8000/schema
 ```
+
+Generate or read the automatic executive insight report:
+
+```bash
+curl -X POST http://localhost:8000/insights/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"manual","persist":true}'
+
+curl http://localhost:8000/insights/latest
+curl http://localhost:8000/insights/latest.md
+```
+
+The n8n workflow `Rappi Ops Copilot - Automatic Insights Report` runs the same
+generation endpoint on a Monday 07:00 `America/Bogota` schedule. The Next.js app
+loads `/insights/latest` and links to the Markdown output.
 
 Example model-facing SQL query endpoint:
 

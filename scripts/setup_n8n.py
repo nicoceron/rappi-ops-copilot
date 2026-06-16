@@ -17,7 +17,8 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW_PATH = ROOT / "workflows" / "rappi_ops_chat_agent.json"
+CHAT_WORKFLOW_PATH = ROOT / "workflows" / "rappi_ops_chat_agent.json"
+INSIGHTS_WORKFLOW_PATH = ROOT / "workflows" / "rappi_ops_automatic_insights.json"
 ENV_PATH = ROOT / ".env"
 DEEPSEEK_CREDENTIAL_NAME = "DeepSeek account"
 POSTGRES_CREDENTIAL_NAME = "Rappi Ops Postgres"
@@ -25,8 +26,20 @@ DEFAULT_CREDENTIAL_IDS = {
     DEEPSEEK_CREDENTIAL_NAME: "rappiDeepSeek001",
     POSTGRES_CREDENTIAL_NAME: "rappiOpsPostgres",
 }
-WORKFLOW_NAME = "Rappi Ops Copilot - DeepSeek Chat Agent"
-DEFAULT_WORKFLOW_ID = "rappiOpsAgent001"
+CHAT_WORKFLOW_NAME = "Rappi Ops Copilot - DeepSeek Chat Agent"
+INSIGHTS_WORKFLOW_NAME = "Rappi Ops Copilot - Automatic Insights Report"
+WORKFLOW_SPECS = [
+    {
+        "name": CHAT_WORKFLOW_NAME,
+        "path": CHAT_WORKFLOW_PATH,
+        "default_id": "rappiOpsAgent001",
+    },
+    {
+        "name": INSIGHTS_WORKFLOW_NAME,
+        "path": INSIGHTS_WORKFLOW_PATH,
+        "default_id": "rappiOpsInsights001",
+    },
+]
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -141,10 +154,10 @@ def restart_n8n() -> None:
     run(["docker", "compose", "restart", "n8n"])
 
 
-def get_workflow_id(workflows: list[dict[str, Any]]) -> str:
-    workflow = next((item for item in workflows if item.get("name") == WORKFLOW_NAME), None)
+def get_workflow_id(workflows: list[dict[str, Any]], workflow_name: str) -> str:
+    workflow = next((item for item in workflows if item.get("name") == workflow_name), None)
     if not workflow or not workflow.get("id"):
-        raise RuntimeError(f"Could not find imported workflow '{WORKFLOW_NAME}'")
+        raise RuntimeError(f"Could not find imported workflow '{workflow_name}'")
     return str(workflow["id"])
 
 
@@ -192,6 +205,7 @@ def credential_payload(existing: list[dict[str, Any]], env: dict[str, str]) -> l
 def workflow_payload(
     credentials: list[dict[str, Any]],
     workflows: list[dict[str, Any]],
+    workflow_spec: dict[str, Any],
     *,
     activate: bool,
 ) -> dict[str, Any]:
@@ -201,12 +215,15 @@ def workflow_payload(
     if not deepseek_id or not postgres_id:
         raise RuntimeError("Expected DeepSeek and Postgres credentials to exist after import")
 
-    workflow = json.loads(WORKFLOW_PATH.read_text())
-    existing_workflow = next((item for item in workflows if item.get("name") == WORKFLOW_NAME), None)
+    workflow = json.loads(Path(workflow_spec["path"]).read_text())
+    existing_workflow = next(
+        (item for item in workflows if item.get("name") == workflow_spec["name"]),
+        None,
+    )
     if existing_workflow and existing_workflow.get("id"):
         workflow["id"] = existing_workflow["id"]
     else:
-        workflow["id"] = DEFAULT_WORKFLOW_ID
+        workflow["id"] = workflow_spec["default_id"]
 
     workflow["active"] = activate
     workflow.setdefault("meta", {})["templateCredsSetupCompleted"] = True
@@ -242,23 +259,32 @@ def main() -> int:
 
         imported_credentials = export_credentials()
         existing_workflows = export_workflows()
-        workflow_path = temp / "workflow.json"
-        workflow_path.write_text(
-            json.dumps(
-                workflow_payload(imported_credentials, existing_workflows, activate=args.activate),
-                indent=2,
+        imported_names = []
+        for index, workflow_spec in enumerate(WORKFLOW_SPECS):
+            workflow_path = temp / f"workflow-{index}.json"
+            workflow_path.write_text(
+                json.dumps(
+                    workflow_payload(
+                        imported_credentials,
+                        existing_workflows,
+                        workflow_spec,
+                        activate=args.activate,
+                    ),
+                    indent=2,
+                )
             )
-        )
-        import_workflow(workflow_path)
+            import_workflow(workflow_path)
+            imported_names.append(workflow_spec["name"])
 
         imported_workflows = export_workflows()
-        workflow_id = get_workflow_id(imported_workflows)
         if args.activate:
-            set_workflow_active(workflow_id)
+            for workflow_spec in WORKFLOW_SPECS:
+                workflow_id = get_workflow_id(imported_workflows, workflow_spec["name"])
+                set_workflow_active(workflow_id)
             restart_n8n()
 
     workflow_state = "active" if args.activate else "inactive"
-    print(f"Imported workflow '{WORKFLOW_NAME}' ({workflow_state}).")
+    print(f"Imported workflows ({workflow_state}): {', '.join(imported_names)}.")
     print(f"Configured credentials: {DEEPSEEK_CREDENTIAL_NAME}, {POSTGRES_CREDENTIAL_NAME}.")
     return 0
 

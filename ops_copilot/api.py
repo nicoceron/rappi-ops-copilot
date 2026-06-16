@@ -19,10 +19,11 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 
 from ops_copilot import __version__
 from ops_copilot.data_loader import load_workbook
+from ops_copilot.insights import InsightReport, generate_executive_insight_report
 from ops_copilot.models import QueryResult, SemanticQuery
 from ops_copilot.postgres_loader import ensure_postgres_loaded
 from ops_copilot.query_engine import QueryEngine, QueryValidationError
-from ops_copilot.settings import default_data_file
+from ops_copilot.settings import default_data_file, export_dir
 
 app = FastAPI(
     title="Rappi Ops Copilot API",
@@ -40,6 +41,7 @@ app.add_middleware(
 
 _ENGINE: QueryEngine | None = None
 _RESULT_CACHE: dict[str, QueryResult | "SqlQueryResult"] = {}
+_INSIGHT_REPORT_CACHE: InsightReport | None = None
 _WRITE_SQL_RE = re.compile(
     r"\b(alter|analyze|call|comment|copy|create|delete|do|drop|execute|grant|insert|"
     r"merge|refresh|reindex|revoke|truncate|update|vacuum)\b",
@@ -70,6 +72,11 @@ class SqlQueryResult(BaseModel):
     visualization_hint: str
     caveats: list[str] = Field(default_factory=list)
     suggested_followups: list[str] = Field(default_factory=list)
+
+
+class GenerateInsightsRequest(BaseModel):
+    source: str = "api"
+    persist: bool = True
 
 
 @app.on_event("startup")
@@ -156,6 +163,33 @@ def run_sql(request: SqlQueryRequest) -> SqlQueryResult:
     return result
 
 
+@app.post("/insights/generate", response_model=InsightReport)
+def generate_insights(request: GenerateInsightsRequest) -> InsightReport:
+    return _generate_and_store_insights(source=request.source, persist=request.persist)
+
+
+@app.get("/insights/latest", response_model=InsightReport)
+def latest_insights() -> InsightReport:
+    report = _load_latest_insight_report()
+    if report:
+        return report
+    if _INSIGHT_REPORT_CACHE:
+        return _INSIGHT_REPORT_CACHE
+    return _generate_and_store_insights(source="api_on_demand", persist=True)
+
+
+@app.get("/insights/latest.md")
+def latest_insights_markdown() -> Response:
+    report = latest_insights()
+    return Response(
+        content=report.markdown,
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'inline; filename="{report.report_id}-executive-insights.md"'
+        },
+    )
+
+
 @app.get("/exports/{query_id}.csv")
 def export_csv(query_id: str) -> Response:
     result = _cached_result(query_id)
@@ -194,6 +228,94 @@ def _cached_result(query_id: str) -> QueryResult | SqlQueryResult:
             detail="Unknown query_id. Export is available only for results produced since API startup.",
         )
     return result
+
+
+def _generate_and_store_insights(source: str, persist: bool) -> InsightReport:
+    global _INSIGHT_REPORT_CACHE
+    report = generate_executive_insight_report(_engine().dataset, source=source)
+    _INSIGHT_REPORT_CACHE = report
+    _write_insight_report_files(report)
+    if persist:
+        _store_insight_report(report)
+    return report
+
+
+def _store_insight_report(report: InsightReport) -> None:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return
+    try:
+        import psycopg
+        from psycopg.types.json import Jsonb
+    except ImportError:
+        return
+
+    payload = report.model_dump(mode="json")
+    try:
+        with psycopg.connect(database_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    insert into executive_insight_report (
+                      report_id, source, period_label, report_markdown, report_json
+                    )
+                    values (%s, %s, %s, %s, %s::jsonb)
+                    on conflict (report_id) do update set
+                      source = excluded.source,
+                      period_label = excluded.period_label,
+                      report_markdown = excluded.report_markdown,
+                      report_json = excluded.report_json
+                    """,
+                    (
+                        report.report_id,
+                        report.source,
+                        report.period_label,
+                        report.markdown,
+                        Jsonb(jsonable_encoder(payload)),
+                    ),
+                )
+            conn.commit()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Could not store insight report: {exc}") from exc
+
+
+def _load_latest_insight_report() -> InsightReport | None:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        return None
+    try:
+        import psycopg
+        from psycopg.rows import dict_row
+    except ImportError:
+        return None
+
+    try:
+        with psycopg.connect(database_url, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    select report_json
+                    from executive_insight_report
+                    order by created_at desc
+                    limit 1
+                    """
+                )
+                row = cur.fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return InsightReport.model_validate(row["report_json"])
+
+
+def _write_insight_report_files(report: InsightReport) -> None:
+    directory = export_dir() / "reports"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "latest-executive-insights.md").write_text(report.markdown, encoding="utf-8")
+    (directory / "latest-executive-insights.json").write_text(
+        report.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
 
 
 def _clean_read_only_sql(sql: str) -> str:

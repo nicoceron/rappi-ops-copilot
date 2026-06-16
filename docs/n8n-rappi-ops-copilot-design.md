@@ -84,6 +84,10 @@ flowchart LR
   agent --> exportTool["Tool: export_result"]
   queryTool --> db["Postgres semantic tables"]
   exportTool --> files["CSV / PDF / chart artifact"]
+  schedule["Schedule Trigger"] --> reportApi["POST /insights/generate"]
+  reportApi --> reportTable["executive_insight_report"]
+  next["Next.js dashboard"] --> latestReport["GET /insights/latest"]
+  latestReport --> reportTable
   ingest["Ingestion workflow"] --> db
   xlsx["Excel workbook"] --> ingest
 ```
@@ -204,6 +208,28 @@ Node design:
 4. Postgres Chat Memory
    - Keyed by `sessionId`.
    - Store user preferences, previous filters, previous query IDs, and last result summaries.
+
+### 2b. `rappi_ops_automatic_insights`
+
+Purpose: Generate the executive insight report without a user prompt.
+
+Trigger options:
+
+- Manual Trigger for demos and local validation.
+- Schedule Trigger for production. The committed workflow runs every Monday at 07:00 in `America/Bogota`.
+
+Node design:
+
+1. Manual Trigger and Schedule Trigger.
+2. HTTP Request to `POST http://ops-api:8000/insights/generate`.
+3. Ops API runs deterministic rules for:
+   - Anomalies: L0W vs L1W movements greater than 10%.
+   - Worrying trends: 3+ consecutive weeks of directional deterioration.
+   - Benchmarking: same-country and same-zone-type peer divergence.
+   - Correlations: metric relationships such as Lead Penetration and conversion/quality proxies.
+   - General opportunities: composite zone risk from weak metrics, deterioration, trends, and prioritization.
+4. Ops API persists the latest report in `executive_insight_report` and writes Markdown/JSON copies under `outputs/reports/`.
+5. Next.js reads `GET /insights/latest` and links to `GET /insights/latest.md`.
 
 ### 3. `rappi_ops_get_schema`
 

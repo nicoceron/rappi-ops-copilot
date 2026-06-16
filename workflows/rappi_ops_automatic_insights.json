@@ -1,0 +1,91 @@
+{
+  "name": "Rappi Ops Copilot - Automatic Insights Report",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -620,
+        -60
+      ],
+      "id": "ef12d5b2-9baa-4f68-840f-3d65cf1d2c20",
+      "name": "Manual report run"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -620,
+        120
+      ],
+      "id": "80907428-1ae5-46bc-9a53-49130ab16f83",
+      "name": "Every Monday 07:00"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ops-api:8000/insights/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"source\": \"n8n_schedule\",\n  \"persist\": true\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -280,
+        30
+      ],
+      "id": "61396eef-ef21-4c15-ae66-1a4518950865",
+      "name": "Generate executive insights"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual report run": {
+      "main": [
+        [
+          {
+            "node": "Generate executive insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every Monday 07:00": {
+      "main": [
+        [
+          {
+            "node": "Generate executive insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Bogota"
+  },
+  "versionId": "62ca87b9-4443-438f-bd32-0c2d525a7c7a",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

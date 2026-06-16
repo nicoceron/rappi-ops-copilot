@@ -1,0 +1,913 @@
+from __future__ import annotations
+
+import math
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Literal
+
+import pandas as pd
+from pydantic import BaseModel, Field
+
+from ops_copilot.data_loader import OperationalDataset
+
+
+InsightCategoryKey = Literal[
+    "anomalies",
+    "worrying_trends",
+    "benchmarking",
+    "correlations",
+    "opportunities",
+]
+Severity = Literal["critical", "high", "medium", "low"]
+
+
+CATEGORY_TITLES: dict[InsightCategoryKey, str] = {
+    "anomalies": "Anomalies",
+    "worrying_trends": "Worrying trends",
+    "benchmarking": "Benchmarking",
+    "correlations": "Correlations",
+    "opportunities": "General opportunities",
+}
+
+SEVERITY_RANK: dict[str, int] = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+}
+
+CORRELATION_PAIRS = [
+    ("lead_penetration", "perfect_orders"),
+    ("lead_penetration", "restaurants_ss_to_atc_cvr"),
+    ("lead_penetration", "restaurants_sst_to_ss_cvr"),
+    ("lead_penetration", "pro_adoption_last_week_status"),
+    ("lead_penetration", "orders"),
+    ("perfect_orders", "orders"),
+    ("restaurants_ss_to_atc_cvr", "orders"),
+]
+
+OPPORTUNITY_METRICS = {
+    "gross_profit_ue",
+    "lead_penetration",
+    "orders",
+    "perfect_orders",
+    "restaurants_ss_to_atc_cvr",
+    "restaurants_sst_to_ss_cvr",
+    "turbo_adoption",
+}
+
+
+class InsightFinding(BaseModel):
+    id: str
+    category: InsightCategoryKey
+    severity: Severity
+    title: str
+    summary: str
+    recommendation: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class InsightCategory(BaseModel):
+    key: InsightCategoryKey
+    title: str
+    findings: list[InsightFinding]
+
+
+class InsightReport(BaseModel):
+    report_id: str
+    generated_at: str
+    source: str
+    period_label: str
+    executive_summary: list[InsightFinding]
+    categories: list[InsightCategory]
+    markdown: str
+    data_caveats: list[str] = Field(default_factory=list)
+
+
+def generate_executive_insight_report(
+    dataset: OperationalDataset, *, source: str = "api"
+) -> InsightReport:
+    facts = _fact_frame(dataset)
+    catalog = _metric_catalog(dataset)
+
+    anomalies = _anomaly_findings(facts, catalog)
+    trends = _trend_findings(facts, catalog)
+    benchmarks = _benchmark_findings(facts, catalog)
+    correlations = _correlation_findings(facts, catalog)
+    opportunities = _opportunity_findings(facts, catalog)
+
+    categories = [
+        InsightCategory(key="anomalies", title=CATEGORY_TITLES["anomalies"], findings=anomalies),
+        InsightCategory(
+            key="worrying_trends",
+            title=CATEGORY_TITLES["worrying_trends"],
+            findings=trends,
+        ),
+        InsightCategory(
+            key="benchmarking",
+            title=CATEGORY_TITLES["benchmarking"],
+            findings=benchmarks,
+        ),
+        InsightCategory(
+            key="correlations",
+            title=CATEGORY_TITLES["correlations"],
+            findings=correlations,
+        ),
+        InsightCategory(
+            key="opportunities",
+            title=CATEGORY_TITLES["opportunities"],
+            findings=opportunities,
+        ),
+    ]
+    executive_summary = _executive_summary(categories)
+    report = InsightReport(
+        report_id=str(uuid.uuid4()),
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        source=source,
+        period_label="L0W latest available week, compared with L1W-L8W relative history",
+        executive_summary=executive_summary,
+        categories=categories,
+        markdown="",
+        data_caveats=[
+            "The dataset uses relative weeks. L0W is the latest available week, not a calendar date.",
+            "Rate metrics are simple stored values. The workbook does not provide denominators for weighted averages.",
+            "Lead Penetration contains outliers above normal rate ranges; correlation logic excludes values above 1 for that metric.",
+            "Recommendations are operational hypotheses from observed metric patterns, not causal proof.",
+        ],
+    )
+    report.markdown = render_report_markdown(report)
+    return report
+
+
+def render_report_markdown(report: InsightReport) -> str:
+    lines = [
+        "# Rappi Ops Executive Insight Report",
+        "",
+        f"- Report ID: `{report.report_id}`",
+        f"- Generated at: `{report.generated_at}`",
+        f"- Source: `{report.source}`",
+        f"- Period: {report.period_label}",
+        "",
+        "## Executive summary",
+        "",
+    ]
+    if report.executive_summary:
+        for index, finding in enumerate(report.executive_summary, start=1):
+            lines.extend(
+                [
+                    f"{index}. **[{finding.severity.upper()}] {finding.title}**",
+                    f"   - Insight: {finding.summary}",
+                    f"   - Recommendation: {finding.recommendation}",
+                ]
+            )
+    else:
+        lines.append("No critical findings were detected with the current thresholds.")
+
+    for category in report.categories:
+        lines.extend(["", f"## {category.title}", ""])
+        if not category.findings:
+            lines.append("No findings detected for this category.")
+            continue
+        for finding in category.findings:
+            lines.extend(
+                [
+                    f"### [{finding.severity.upper()}] {finding.title}",
+                    "",
+                    f"- Insight: {finding.summary}",
+                    f"- Recommendation: {finding.recommendation}",
+                ]
+            )
+            evidence = _evidence_text(finding.evidence)
+            if evidence:
+                lines.append(f"- Evidence: {evidence}")
+            lines.append("")
+
+    lines.extend(["## Data caveats", ""])
+    for caveat in report.data_caveats:
+        lines.append(f"- {caveat}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _fact_frame(dataset: OperationalDataset) -> pd.DataFrame:
+    metric_facts = dataset.metric_facts[
+        ["zone_id", "metric_key", "week_offset", "week_label", "value"]
+    ].copy()
+    order_facts = dataset.order_facts[
+        ["zone_id", "week_offset", "week_label", "orders"]
+    ].copy()
+    order_facts["metric_key"] = "orders"
+    order_facts = order_facts.rename(columns={"orders": "value"})
+    order_facts = order_facts[["zone_id", "metric_key", "week_offset", "week_label", "value"]]
+
+    facts = pd.concat([metric_facts, order_facts], ignore_index=True)
+    facts["value"] = pd.to_numeric(facts["value"], errors="coerce")
+    facts = facts.dropna(subset=["value"])
+    facts = facts.drop_duplicates(subset=["zone_id", "metric_key", "week_offset"])
+    facts = facts.merge(dataset.zones, on="zone_id", how="left")
+    facts = facts.merge(
+        dataset.metrics[
+            [
+                "metric_key",
+                "metric_name",
+                "default_direction",
+                "value_kind",
+                "outlier_policy",
+            ]
+        ],
+        on="metric_key",
+        how="left",
+    )
+    return facts
+
+
+def _metric_catalog(dataset: OperationalDataset) -> dict[str, dict[str, str]]:
+    return {
+        str(row["metric_key"]): {
+            "metric_name": str(row["metric_name"]),
+            "default_direction": str(row["default_direction"]),
+            "value_kind": str(row["value_kind"]),
+            "outlier_policy": str(row["outlier_policy"]),
+        }
+        for row in dataset.metrics.to_dict(orient="records")
+    }
+
+
+def _anomaly_findings(
+    facts: pd.DataFrame, catalog: dict[str, dict[str, str]]
+) -> list[InsightFinding]:
+    latest = facts[facts["week_offset"].isin([0, 1])].copy()
+    pivot = latest.pivot_table(
+        index=[
+            "zone_id",
+            "country",
+            "city",
+            "zone",
+            "zone_type",
+            "metric_key",
+            "metric_name",
+            "default_direction",
+            "value_kind",
+        ],
+        columns="week_offset",
+        values="value",
+        aggfunc="mean",
+    ).reset_index()
+    if 0 not in pivot.columns or 1 not in pivot.columns:
+        return []
+
+    pivot = pivot.rename(columns={0: "current_value", 1: "previous_value"}).dropna(
+        subset=["current_value", "previous_value"]
+    )
+    pivot = pivot[
+        pivot.apply(
+            lambda row: abs(float(row["previous_value"]))
+            >= _minimum_baseline(str(row["value_kind"])),
+            axis=1,
+        )
+    ]
+    pivot["delta"] = pivot["current_value"] - pivot["previous_value"]
+    pivot["change_score"] = pivot.apply(
+        lambda row: _scaled_change(
+            float(row["current_value"]),
+            float(row["previous_value"]),
+            str(row["value_kind"]),
+        ),
+        axis=1,
+    )
+    pivot = pivot[pivot["change_score"].abs() >= 0.10]
+    pivot["severity_abs"] = pivot["change_score"].abs()
+    pivot = pivot.sort_values("severity_abs", ascending=False).head(8)
+
+    findings = []
+    for index, row in enumerate(pivot.to_dict(orient="records"), start=1):
+        direction = row["default_direction"]
+        change_score = float(row["change_score"])
+        movement = _movement_label(direction, float(row["delta"]))
+        metric_name = str(row["metric_name"])
+        value_kind = str(row["value_kind"])
+        title = f"{metric_name} {movement} in {row['zone']}, {row['city']} ({row['country']})"
+        if value_kind == "currency_per_order":
+            summary = (
+                f"{metric_name} changed by {_signed_number(row['delta'])} week-over-week, "
+                f"from {_value(row['previous_value'], value_kind)} in L1W to "
+                f"{_value(row['current_value'], value_kind)} in L0W."
+            )
+        else:
+            summary = (
+                f"{metric_name} moved {_pct(change_score)} week-over-week, from "
+                f"{_value(row['previous_value'], value_kind)} in L1W to "
+                f"{_value(row['current_value'], value_kind)} in L0W."
+            )
+        recommendation = (
+            "Audit the local operating changes behind the improvement and decide whether they can be replicated."
+            if movement == "improved"
+            else "Inspect local supply, funnel, and execution changes immediately; this crossed the 10% week-over-week threshold."
+        )
+        findings.append(
+            InsightFinding(
+                id=_finding_id("anomaly", title, index),
+                category="anomalies",
+                severity=_severity_from_pct(abs(change_score)),
+                title=title,
+                summary=summary,
+                recommendation=recommendation,
+                evidence={
+                    "country": row["country"],
+                    "city": row["city"],
+                    "zone": row["zone"],
+                    "zone_type": row["zone_type"],
+                    "metric": metric_name,
+                    "previous_week": "L1W",
+                    "current_week": "L0W",
+                    "previous_value": _safe_float(row["previous_value"]),
+                    "current_value": _safe_float(row["current_value"]),
+                    "delta": _safe_float(row["delta"]),
+                    "change_score": _safe_float(change_score),
+                    "direction": direction,
+                    "outlier_policy": catalog.get(row["metric_key"], {}).get("outlier_policy"),
+                },
+            )
+        )
+    return findings
+
+
+def _trend_findings(
+    facts: pd.DataFrame, catalog: dict[str, dict[str, str]]
+) -> list[InsightFinding]:
+    directional = facts[
+        (facts["week_offset"].isin([0, 1, 2, 3]))
+        & (facts["default_direction"].isin(["higher_better", "lower_better"]))
+    ].copy()
+    pivot = directional.pivot_table(
+        index=[
+            "zone_id",
+            "country",
+            "city",
+            "zone",
+            "zone_type",
+            "metric_key",
+            "metric_name",
+            "default_direction",
+            "value_kind",
+        ],
+        columns="week_offset",
+        values="value",
+        aggfunc="mean",
+    ).reset_index()
+    if not all(offset in pivot.columns for offset in [0, 1, 2, 3]):
+        return []
+
+    pivot = pivot.dropna(subset=[0, 1, 2, 3])
+    higher = pivot["default_direction"] == "higher_better"
+    lower = pivot["default_direction"] == "lower_better"
+    deteriorating = (higher & (pivot[3] > pivot[2]) & (pivot[2] > pivot[1]) & (pivot[1] > pivot[0])) | (
+        lower & (pivot[3] < pivot[2]) & (pivot[2] < pivot[1]) & (pivot[1] < pivot[0])
+    )
+    pivot = pivot[deteriorating].copy()
+    if pivot.empty:
+        return []
+    pivot = pivot[
+        pivot.apply(
+            lambda row: abs(float(row[3])) >= _minimum_baseline(str(row["value_kind"])),
+            axis=1,
+        )
+    ]
+    if pivot.empty:
+        return []
+
+    pivot["relative_deterioration"] = pivot.apply(
+        lambda row: _relative_deterioration(
+            float(row[3]), float(row[0]), str(row["default_direction"])
+        ),
+        axis=1,
+    )
+    pivot = pivot.sort_values("relative_deterioration", ascending=False).head(8)
+
+    findings = []
+    for index, row in enumerate(pivot.to_dict(orient="records"), start=1):
+        metric_name = str(row["metric_name"])
+        value_kind = str(row["value_kind"])
+        values = {
+            f"L{offset}W": _safe_float(row[offset])
+            for offset in [3, 2, 1, 0]
+        }
+        title = f"{metric_name} deteriorated for 3 consecutive weeks in {row['zone']}"
+        summary = (
+            f"{metric_name} has worsened each week from L3W to L0W in "
+            f"{row['zone']}, {row['city']} ({row['country']}). Latest value: "
+            f"{_value(row[0], value_kind)}."
+        )
+        findings.append(
+            InsightFinding(
+                id=_finding_id("trend", title, index),
+                category="worrying_trends",
+                severity=_severity_from_score(float(row["relative_deterioration"])),
+                title=title,
+                summary=summary,
+                recommendation=(
+                    "Create a recovery owner for this zone and review weekly drivers before the deterioration becomes the new baseline."
+                ),
+                evidence={
+                    "country": row["country"],
+                    "city": row["city"],
+                    "zone": row["zone"],
+                    "zone_type": row["zone_type"],
+                    "metric": metric_name,
+                    "values": values,
+                    "relative_deterioration": _safe_float(row["relative_deterioration"]),
+                    "direction": catalog.get(row["metric_key"], {}).get("default_direction"),
+                },
+            )
+        )
+    return findings
+
+
+def _benchmark_findings(
+    facts: pd.DataFrame, catalog: dict[str, dict[str, str]]
+) -> list[InsightFinding]:
+    current = facts[
+        (facts["week_offset"] == 0)
+        & (facts["default_direction"].isin(["higher_better", "lower_better"]))
+    ].copy()
+    peer_stats = (
+        current.groupby(["country", "zone_type", "metric_key"], dropna=False)
+        .agg(
+            peer_median=("value", "median"),
+            peer_p25=("value", lambda series: series.quantile(0.25)),
+            peer_p75=("value", lambda series: series.quantile(0.75)),
+            peer_n=("zone_id", "nunique"),
+        )
+        .reset_index()
+    )
+    current = current.merge(peer_stats, on=["country", "zone_type", "metric_key"], how="left")
+    current = current[(current["peer_n"] >= 5)]
+    current["gap_value"] = current["value"] - current["peer_median"]
+    current["peer_scale"] = current.apply(
+        lambda row: _benchmark_scale(
+            float(row["peer_median"]),
+            float(row["peer_p75"] - row["peer_p25"]),
+            str(row["value_kind"]),
+        ),
+        axis=1,
+    )
+    current = current[current["peer_scale"] > 0]
+    current["gap_score"] = current["gap_value"] / current["peer_scale"]
+    current["underperformance_score"] = current.apply(
+        lambda row: -float(row["gap_score"])
+        if row["default_direction"] == "higher_better"
+        else float(row["gap_score"]),
+        axis=1,
+    )
+    current = current[current["underperformance_score"] >= 0.15]
+    current = current.sort_values("underperformance_score", ascending=False).head(8)
+
+    findings = []
+    for index, row in enumerate(current.to_dict(orient="records"), start=1):
+        metric_name = str(row["metric_name"])
+        value_kind = str(row["value_kind"])
+        zone_type = str(row["zone_type"] or "untyped")
+        title = f"{row['zone']} trails {row['country']} {zone_type} peers on {metric_name}"
+        if value_kind == "currency_per_order":
+            summary = (
+                f"{row['zone']} is {_signed_number(row['gap_value'])} versus the "
+                f"same-country, same-type peer median for {metric_name}."
+            )
+        else:
+            summary = (
+                f"{row['zone']} is {_pct(row['underperformance_score'])} worse than the "
+                f"same-country, same-type peer median for {metric_name}."
+            )
+        findings.append(
+            InsightFinding(
+                id=_finding_id("benchmark", title, index),
+                category="benchmarking",
+                severity=_severity_from_pct(float(row["underperformance_score"])),
+                title=title,
+                summary=summary,
+                recommendation=(
+                    "Compare staffing, merchant coverage, and funnel practices against the stronger peer zones in the same benchmark group."
+                ),
+                evidence={
+                    "country": row["country"],
+                    "city": row["city"],
+                    "zone": row["zone"],
+                    "zone_type": row["zone_type"],
+                    "metric": metric_name,
+                    "current_value": _safe_float(row["value"]),
+                    "peer_median": _safe_float(row["peer_median"]),
+                    "peer_n": int(row["peer_n"]),
+                    "gap_value": _safe_float(row["gap_value"]),
+                    "gap_score": _safe_float(row["gap_score"]),
+                    "underperformance_score": _safe_float(row["underperformance_score"]),
+                    "current_value_label": _value(row["value"], value_kind),
+                    "peer_median_label": _value(row["peer_median"], value_kind),
+                    "direction": catalog.get(row["metric_key"], {}).get("default_direction"),
+                },
+            )
+        )
+    return findings
+
+
+def _correlation_findings(
+    facts: pd.DataFrame, catalog: dict[str, dict[str, str]]
+) -> list[InsightFinding]:
+    current = facts[facts["week_offset"] == 0].copy()
+    current.loc[
+        (current["metric_key"] == "lead_penetration") & (current["value"] > 1),
+        "value",
+    ] = math.nan
+    pivot = current.pivot_table(
+        index=["zone_id", "country", "city", "zone", "zone_type"],
+        columns="metric_key",
+        values="value",
+        aggfunc="mean",
+    ).reset_index()
+
+    rows = []
+    for metric_x, metric_y in CORRELATION_PAIRS:
+        if metric_x not in pivot.columns or metric_y not in pivot.columns:
+            continue
+        pair = pivot[["zone_id", "country", "city", "zone", metric_x, metric_y]].dropna()
+        if len(pair) < 25:
+            continue
+        corr = pair[metric_x].corr(pair[metric_y])
+        if pd.isna(corr):
+            continue
+        x_p25 = pair[metric_x].quantile(0.25)
+        y_p25 = pair[metric_y].quantile(0.25)
+        low_low = pair[(pair[metric_x] <= x_p25) & (pair[metric_y] <= y_p25)]
+        rows.append(
+            {
+                "metric_x": metric_x,
+                "metric_y": metric_y,
+                "corr": float(corr),
+                "n_zones": int(len(pair)),
+                "low_low_count": int(len(low_low)),
+                "x_p25": float(x_p25),
+                "y_p25": float(y_p25),
+            }
+        )
+    rows = sorted(rows, key=lambda item: abs(item["corr"]), reverse=True)[:5]
+
+    findings = []
+    for index, row in enumerate(rows, start=1):
+        metric_x = _metric_name(catalog, row["metric_x"])
+        metric_y = _metric_name(catalog, row["metric_y"])
+        relationship = "move together" if row["corr"] >= 0 else "move in opposite directions"
+        title = f"{metric_x} and {metric_y} {relationship}"
+        summary = (
+            f"Across {row['n_zones']} zones, Pearson correlation is "
+            f"{row['corr']:.2f}. {row['low_low_count']} zones sit in the bottom quartile of both metrics."
+        )
+        findings.append(
+            InsightFinding(
+                id=_finding_id("correlation", title, index),
+                category="correlations",
+                severity=_severity_from_correlation(abs(row["corr"]), row["low_low_count"]),
+                title=title,
+                summary=summary,
+                recommendation=(
+                    "Use the low-low zone list as a diagnostic queue and test whether improving the upstream metric lifts the downstream conversion or quality metric."
+                ),
+                evidence={
+                    "metric_x": metric_x,
+                    "metric_y": metric_y,
+                    "pearson_correlation": _safe_float(row["corr"]),
+                    "n_zones": row["n_zones"],
+                    "low_low_count": row["low_low_count"],
+                    "metric_x_p25": _safe_float(row["x_p25"]),
+                    "metric_y_p25": _safe_float(row["y_p25"]),
+                },
+            )
+        )
+    return findings
+
+
+def _opportunity_findings(
+    facts: pd.DataFrame, catalog: dict[str, dict[str, str]]
+) -> list[InsightFinding]:
+    current = facts[
+        (facts["week_offset"] == 0)
+        & (facts["metric_key"].isin(OPPORTUNITY_METRICS))
+        & (facts["default_direction"].isin(["higher_better", "lower_better"]))
+    ].copy()
+    if current.empty:
+        return []
+
+    current["percentile"] = current.groupby("metric_key")["value"].rank(pct=True)
+    current["metric_risk"] = current.apply(
+        lambda row: 1 - float(row["percentile"])
+        if row["default_direction"] == "higher_better"
+        else float(row["percentile"]),
+        axis=1,
+    )
+    zone_risk = (
+        current.groupby(["zone_id", "country", "city", "zone", "zone_type", "zone_prioritization"])
+        .agg(avg_metric_risk=("metric_risk", "mean"), max_metric_risk=("metric_risk", "max"))
+        .reset_index()
+    )
+
+    deterioration = _latest_deterioration_by_zone(facts)
+    trend_counts = _trend_count_by_zone(facts)
+    zone_risk = zone_risk.merge(deterioration, on="zone_id", how="left")
+    zone_risk = zone_risk.merge(trend_counts, on="zone_id", how="left")
+    zone_risk["max_deterioration_pct"] = zone_risk["max_deterioration_pct"].fillna(0)
+    zone_risk["trend_count"] = zone_risk["trend_count"].fillna(0)
+    priority_boost = zone_risk["zone_prioritization"].map(
+        {"High Priority": 0.15, "Prioritized": 0.08}
+    ).fillna(0)
+    zone_risk["opportunity_score"] = (
+        zone_risk["avg_metric_risk"]
+        + priority_boost
+        + zone_risk["max_deterioration_pct"].clip(upper=0.6) * 0.30
+        + zone_risk["trend_count"].clip(upper=3) * 0.05
+    )
+    zone_risk = zone_risk.sort_values("opportunity_score", ascending=False).head(6)
+
+    findings = []
+    for index, row in enumerate(zone_risk.to_dict(orient="records"), start=1):
+        weak_metrics = _weak_metrics_for_zone(current, str(row["zone_id"]), catalog)
+        weak_labels = ", ".join(item["metric"] for item in weak_metrics[:3])
+        title = f"{row['zone']} is a high-priority intervention candidate"
+        summary = (
+            f"{row['zone']}, {row['city']} ({row['country']}) has a composite opportunity "
+            f"score of {float(row['opportunity_score']):.2f}. Weakest metrics: {weak_labels}."
+        )
+        findings.append(
+            InsightFinding(
+                id=_finding_id("opportunity", title, index),
+                category="opportunities",
+                severity=_severity_from_score(float(row["opportunity_score"])),
+                title=title,
+                summary=summary,
+                recommendation=(
+                    "Assign a short intervention plan focused on the weakest metric cluster, then re-check L0W versus L1W after the next refresh."
+                ),
+                evidence={
+                    "country": row["country"],
+                    "city": row["city"],
+                    "zone": row["zone"],
+                    "zone_type": row["zone_type"],
+                    "zone_prioritization": row["zone_prioritization"],
+                    "opportunity_score": _safe_float(row["opportunity_score"]),
+                    "avg_metric_risk": _safe_float(row["avg_metric_risk"]),
+                    "max_deterioration_pct": _safe_float(row["max_deterioration_pct"]),
+                    "trend_count": int(row["trend_count"]),
+                    "weak_metrics": weak_metrics,
+                },
+            )
+        )
+    return findings
+
+
+def _latest_deterioration_by_zone(facts: pd.DataFrame) -> pd.DataFrame:
+    latest = facts[
+        (facts["week_offset"].isin([0, 1]))
+        & (facts["default_direction"].isin(["higher_better", "lower_better"]))
+    ].copy()
+    pivot = latest.pivot_table(
+        index=["zone_id", "metric_key", "default_direction", "value_kind"],
+        columns="week_offset",
+        values="value",
+        aggfunc="mean",
+    ).reset_index()
+    if 0 not in pivot.columns or 1 not in pivot.columns:
+        return pd.DataFrame(columns=["zone_id", "max_deterioration_pct"])
+    pivot = pivot.dropna(subset=[0, 1])
+    pivot = pivot[
+        pivot.apply(
+            lambda row: abs(float(row[1])) >= _minimum_baseline(str(row["value_kind"])),
+            axis=1,
+        )
+    ]
+    pivot["change_score"] = pivot.apply(
+        lambda row: _scaled_change(float(row[0]), float(row[1]), str(row["value_kind"])),
+        axis=1,
+    )
+    pivot["deterioration_pct"] = pivot.apply(
+        lambda row: max(0.0, -float(row["change_score"]))
+        if row["default_direction"] == "higher_better"
+        else max(0.0, float(row["change_score"])),
+        axis=1,
+    )
+    return (
+        pivot.groupby("zone_id")
+        .agg(max_deterioration_pct=("deterioration_pct", "max"))
+        .reset_index()
+    )
+
+
+def _trend_count_by_zone(facts: pd.DataFrame) -> pd.DataFrame:
+    directional = facts[
+        (facts["week_offset"].isin([0, 1, 2, 3]))
+        & (facts["default_direction"].isin(["higher_better", "lower_better"]))
+    ].copy()
+    pivot = directional.pivot_table(
+        index=["zone_id", "metric_key", "default_direction"],
+        columns="week_offset",
+        values="value",
+        aggfunc="mean",
+    ).reset_index()
+    if not all(offset in pivot.columns for offset in [0, 1, 2, 3]):
+        return pd.DataFrame(columns=["zone_id", "trend_count"])
+    pivot = pivot.dropna(subset=[0, 1, 2, 3])
+    higher = pivot["default_direction"] == "higher_better"
+    lower = pivot["default_direction"] == "lower_better"
+    deteriorating = (higher & (pivot[3] > pivot[2]) & (pivot[2] > pivot[1]) & (pivot[1] > pivot[0])) | (
+        lower & (pivot[3] < pivot[2]) & (pivot[2] < pivot[1]) & (pivot[1] < pivot[0])
+    )
+    return (
+        pivot[deteriorating]
+        .groupby("zone_id")
+        .size()
+        .rename("trend_count")
+        .reset_index()
+    )
+
+
+def _weak_metrics_for_zone(
+    current: pd.DataFrame, zone_id: str, catalog: dict[str, dict[str, str]]
+) -> list[dict[str, Any]]:
+    rows = current[current["zone_id"] == zone_id].sort_values("metric_risk", ascending=False)
+    weak_metrics = []
+    for row in rows.head(3).to_dict(orient="records"):
+        metric_key = str(row["metric_key"])
+        weak_metrics.append(
+            {
+                "metric": _metric_name(catalog, metric_key),
+                "value": _safe_float(row["value"]),
+                "risk": _safe_float(row["metric_risk"]),
+            }
+        )
+    return weak_metrics
+
+
+def _executive_summary(categories: list[InsightCategory]) -> list[InsightFinding]:
+    preferred: list[InsightFinding] = []
+    by_category = {category.key: category.findings for category in categories}
+    for key in ["opportunities", "anomalies", "worrying_trends", "benchmarking", "correlations"]:
+        if by_category.get(key):
+            preferred.append(by_category[key][0])
+
+    all_findings = [finding for category in categories for finding in category.findings]
+    all_findings = sorted(
+        all_findings,
+        key=lambda finding: (SEVERITY_RANK[finding.severity], finding.title),
+        reverse=True,
+    )
+    seen = set()
+    selected = []
+    for finding in preferred + all_findings:
+        if finding.id in seen:
+            continue
+        selected.append(finding)
+        seen.add(finding.id)
+        if len(selected) == 5:
+            break
+    return selected[:5]
+
+
+def _movement_label(direction: str, pct_change: float) -> str:
+    if direction == "higher_better":
+        return "improved" if pct_change > 0 else "deteriorated"
+    if direction == "lower_better":
+        return "improved" if pct_change < 0 else "deteriorated"
+    return "changed"
+
+
+def _relative_deterioration(start_value: float, end_value: float, direction: str) -> float:
+    if abs(start_value) < 1e-9:
+        return 0.0
+    pct = (end_value - start_value) / abs(start_value)
+    return max(0.0, -pct) if direction == "higher_better" else max(0.0, pct)
+
+
+def _scaled_change(current_value: float, previous_value: float, value_kind: str) -> float:
+    scale = abs(previous_value)
+    if value_kind == "currency_per_order":
+        scale = max(scale, 1.0)
+    else:
+        scale = max(scale, _minimum_baseline(value_kind))
+    if scale <= 0:
+        return 0.0
+    return (current_value - previous_value) / scale
+
+
+def _benchmark_scale(peer_median: float, peer_iqr: float, value_kind: str) -> float:
+    if value_kind == "currency_per_order":
+        return max(abs(peer_median), abs(peer_iqr), 1.0)
+    return max(abs(peer_median), _minimum_baseline(value_kind))
+
+
+def _minimum_baseline(value_kind: str) -> float:
+    if value_kind == "count":
+        return 1.0
+    if value_kind == "currency_per_order":
+        return 0.10
+    if value_kind == "rate":
+        return 0.01
+    return 0.01
+
+
+def _metric_name(catalog: dict[str, dict[str, str]], metric_key: str) -> str:
+    return catalog.get(metric_key, {}).get("metric_name", metric_key.replace("_", " ").title())
+
+
+def _severity_from_pct(value: float) -> Severity:
+    if value >= 0.40:
+        return "critical"
+    if value >= 0.25:
+        return "high"
+    if value >= 0.10:
+        return "medium"
+    return "low"
+
+
+def _severity_from_score(value: float) -> Severity:
+    if value >= 0.85:
+        return "critical"
+    if value >= 0.70:
+        return "high"
+    if value >= 0.55:
+        return "medium"
+    return "low"
+
+
+def _severity_from_correlation(abs_corr: float, low_low_count: int) -> Severity:
+    if abs_corr >= 0.55 and low_low_count >= 20:
+        return "high"
+    if abs_corr >= 0.35 and low_low_count >= 10:
+        return "medium"
+    return "low"
+
+
+def _finding_id(prefix: str, title: str, index: int) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:56]
+    return f"{prefix}-{index}-{slug}"
+
+
+def _safe_float(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    number = float(value)
+    if math.isnan(number) or math.isinf(number):
+        return None
+    return number
+
+
+def _pct(value: Any) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return "n/a"
+    return f"{number:+.1%}"
+
+
+def _value(value: Any, value_kind: str | None = None) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return "n/a"
+    if value_kind == "count":
+        return f"{number:,.0f}"
+    if value_kind == "currency_per_order":
+        return f"{number:,.2f}"
+    if value_kind == "rate" and 0 <= number <= 1:
+        return f"{number:.1%}"
+    if abs(number) >= 100:
+        return f"{number:,.0f}"
+    if abs(number) >= 10:
+        return f"{number:,.2f}"
+    return f"{number:.3f}"
+
+
+def _signed_number(value: Any) -> str:
+    number = _safe_float(value)
+    if number is None:
+        return "n/a"
+    return f"{number:+.2f}"
+
+
+def _evidence_text(evidence: dict[str, Any]) -> str:
+    ordered_keys = [
+        "country",
+        "city",
+        "zone",
+        "zone_type",
+        "metric",
+        "change_score",
+        "underperformance_score",
+        "pearson_correlation",
+        "low_low_count",
+        "opportunity_score",
+        "trend_count",
+    ]
+    chunks = []
+    for key in ordered_keys:
+        if key not in evidence or evidence[key] is None:
+            continue
+        value = evidence[key]
+        if isinstance(value, float):
+            value = f"{value:.3g}"
+        chunks.append(f"{key}: {value}")
+    return "; ".join(chunks)

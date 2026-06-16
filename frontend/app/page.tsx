@@ -8,6 +8,7 @@ import {
   MapPinned,
   Workflow,
 } from "lucide-react";
+import { ExecutiveInsights } from "./components/ExecutiveInsights";
 import { N8nChat } from "./components/N8nChat";
 
 const DEFAULT_WEBHOOK_URL =
@@ -133,18 +134,22 @@ export default function Home() {
           </div>
         </aside>
 
-        <section className="chat-panel" aria-label="n8n embedded chat">
-          <div className="chat-header">
-            <div>
-              <p className="eyebrow">Embedded Chat Trigger</p>
-              <h2>Ask the workflow</h2>
+        <div className="content-stack">
+          <ExecutiveInsights />
+
+          <section className="chat-panel" aria-label="Analytics chat">
+            <div className="chat-header">
+              <div>
+                <p className="eyebrow">Custom Chat Trigger UI</p>
+                <h2>Ask the workflow</h2>
+              </div>
+              <span className="webhook-pill">local n8n</span>
             </div>
-            <span className="webhook-pill">local n8n</span>
-          </div>
-          <div className="chat-frame">
-            <N8nChat webhookUrl={webhookUrl} />
-          </div>
-        </section>
+            <div className="chat-frame">
+              <N8nChat webhookUrl={webhookUrl} />
+            </div>
+          </section>
+        </div>
       </section>
     </main>
   );

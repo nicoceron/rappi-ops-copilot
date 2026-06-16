@@ -65,6 +65,15 @@ create table if not exists query_audit (
   created_at timestamptz not null default now()
 );
 
+create table if not exists executive_insight_report (
+  report_id uuid primary key default gen_random_uuid(),
+  source text not null,
+  period_label text not null,
+  report_markdown text not null,
+  report_json jsonb not null,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_dim_zone_country_city_zone
   on dim_zone (country, city, zone);
 
@@ -77,3 +86,5 @@ create index if not exists idx_fact_metric_zone
 create index if not exists idx_fact_orders_week
   on fact_orders_week (week_offset);
 
+create index if not exists idx_executive_insight_report_created_at
+  on executive_insight_report (created_at desc);
