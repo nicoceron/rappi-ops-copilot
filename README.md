@@ -2,13 +2,13 @@
 
 Conversational analytics assistant for Rappi operational metrics.
 
-The project uses n8n orchestration, DeepSeek `deepseek-v4-pro`, and a deterministic data-query layer so non-technical users can ask natural-language questions about operational KPIs, trends, comparisons, and exports.
+The project uses n8n orchestration, DeepSeek `deepseek-v4-pro`, and model-generated read-only SQL so non-technical users can ask natural-language questions about operational KPIs, trends, comparisons, and exports.
 
 ## Current Assets
 
 - `data/`: source workbook with dummy operational metrics.
 - `docs/n8n-rappi-ops-copilot-design.md`: architecture and workflow design for the n8n chatbot.
-- `ops_copilot/`: deterministic analytics API and query engine.
+- `ops_copilot/`: analytics API, workbook loader, Postgres loader, and SQL execution guardrails.
 - `workflows/`: n8n importable chat-agent workflow template.
 - `db/schema.sql`: Postgres semantic schema.
 - `scripts/`: ingestion and smoke-test scripts.
@@ -57,18 +57,15 @@ Schema:
 curl http://localhost:8000/schema
 ```
 
-Example deterministic query:
+Example model-facing SQL query endpoint:
 
 ```bash
-curl -X POST http://localhost:8000/query \
+curl -X POST http://localhost:8000/sql \
   -H 'Content-Type: application/json' \
   -d '{
-    "intent": "compare",
-    "metrics": ["Perfect Orders"],
-    "dimensions": ["zone_type"],
-    "filters": {"country": "Mexico"},
-    "period": {"type": "relative_weeks", "start_offset": 0, "end_offset": 0},
-    "aggregation": "avg",
+    "question": "Compara Perfect Orders entre zonas Wealthy y Non Wealthy en México",
+    "sql": "select z.zone_type, avg(f.value) as perfect_orders, count(distinct z.zone_id) as n_zones from fact_metric_week f join dim_zone z on z.zone_id = f.zone_id where f.metric_key = '\''perfect_orders'\'' and f.week_offset = 0 and z.country = '\''MX'\'' group by z.zone_type order by perfect_orders desc",
+    "limit": 50,
     "visualization": "bar"
   }'
 ```

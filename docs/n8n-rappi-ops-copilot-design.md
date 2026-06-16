@@ -4,7 +4,7 @@
 
 Build a conversational analytics bot for non-technical operations users. Users ask questions in Spanish, English, or mixed language about operational metrics, and the bot returns accurate answers, charts when useful, proactive follow-ups, and optional CSV/PDF exports.
 
-The examples in the prompt are not templates. The bot should support arbitrary natural language by translating the request into a validated semantic query plan, executing deterministic calculations against the data, then using the LLM only for interpretation and explanation.
+The examples in the prompt are not templates. The bot should support arbitrary natural language by letting DeepSeek interpret the request, choose the analytical logic, generate read-only SQL, inspect the returned data, and explain the result.
 
 ## Current Data Source
 
@@ -71,7 +71,7 @@ Data caveats:
 
 Use n8n as the orchestration and chat surface, DeepSeek `deepseek-v4-pro` as the reasoning/model layer, and Postgres as the analytical store.
 
-Postgres is recommended even for the demo because it gives deterministic SQL, repeatable exports, persistent chat memory, and avoids loading the Excel file on every chat turn.
+Postgres is recommended even for the demo because it gives the model a clear SQL surface, repeatable exports, persistent chat memory, and avoids loading the Excel file on every chat turn.
 
 ```mermaid
 flowchart LR
@@ -93,7 +93,7 @@ Why this shape:
 - n8n has a Chat Trigger with prior-session loading and streaming response support.
 - n8n AI Agent can call tools/sub-workflows, which lets the model ask for data without seeing the full dataset.
 - n8n has a DeepSeek Chat Model node; DeepSeek documents `deepseek-v4-pro` as a current model with JSON output and tool-call support.
-- The calculation path is deterministic: LLM plans, code validates, SQL executes, and the LLM narrates.
+- The analysis path is model-led: DeepSeek plans and writes SQL; the API enforces read-only execution, row limits, and exports.
 
 Reference docs:
 

@@ -196,6 +196,71 @@ class OperationalDataset:
                 "last_8_weeks_default": "L7W through L0W",
                 "available_offsets": list(range(8, -1, -1)),
             },
+            "sql": {
+                "dialect": "Postgres",
+                "tables": {
+                    "dim_zone": {
+                        "grain": "one row per zone",
+                        "columns": [
+                            "zone_id",
+                            "country",
+                            "city",
+                            "zone",
+                            "zone_type",
+                            "zone_prioritization",
+                        ],
+                    },
+                    "semantic_metric": {
+                        "grain": "one row per metric definition",
+                        "columns": [
+                            "metric_key",
+                            "metric_name",
+                            "source",
+                            "default_direction",
+                            "value_kind",
+                            "outlier_policy",
+                        ],
+                    },
+                    "metric_synonym": {
+                        "grain": "metric synonym lookup",
+                        "columns": ["synonym", "metric_key"],
+                    },
+                    "fact_metric_week": {
+                        "grain": "one row per zone, metric, and relative week",
+                        "columns": [
+                            "zone_id",
+                            "metric_key",
+                            "week_offset",
+                            "week_label",
+                            "value",
+                            "source_column",
+                        ],
+                    },
+                    "fact_orders_week": {
+                        "grain": "one row per zone and relative week",
+                        "columns": [
+                            "zone_id",
+                            "week_offset",
+                            "week_label",
+                            "orders",
+                            "source_column",
+                        ],
+                    },
+                },
+                "join_patterns": [
+                    "fact_metric_week.zone_id = dim_zone.zone_id",
+                    "fact_metric_week.metric_key = semantic_metric.metric_key",
+                    "fact_orders_week.zone_id = dim_zone.zone_id",
+                    "Join fact_orders_week to fact_metric_week by zone_id and week_offset when comparing orders to metrics.",
+                ],
+                "query_rules": [
+                    "Use week_offset = 0 for the current/latest week.",
+                    "Use week_offset between 7 and 0 for the last 8 weeks.",
+                    "Use metric_key or semantic_metric.metric_name to choose metrics.",
+                    "For rates, report values exactly as stored unless the answer explicitly formats them as percentages.",
+                    "Business context such as problematic zones should be translated by the model into observable metric conditions.",
+                ],
+            },
         }
         if include_examples:
             payload["examples"] = {
@@ -365,4 +430,3 @@ def _build_order_facts(orders: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
     return facts[["zone_id", "week_offset", "week_label", "orders", "source_column"]]
-

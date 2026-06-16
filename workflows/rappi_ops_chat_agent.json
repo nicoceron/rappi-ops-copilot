@@ -19,7 +19,7 @@
     {
       "parameters": {
         "options": {
-          "systemMessage": "You are Rappi Ops Copilot, a bilingual Spanish/English analytics assistant for operations metrics.\n\nYour job is to answer questions using the available operational dataset, not general knowledge. Always use tools before giving numeric answers.\n\nRules:\n- Interpret arbitrary natural language into a structured analytical request.\n- Use Get Schema when you need metric names, dimensions, valid values, or business definitions.\n- Use Query Ops Metrics for every numeric answer, ranking, comparison, trend, aggregation, diagnosis, or export setup.\n- Do not invent metrics, calendar dates, denominators, causes, or unavailable dimensions.\n- The data uses relative weeks. L0W means the most recent available week. Last 8 weeks means L7W through L0W unless the user says otherwise.\n- If the user asks in Spanish, answer in Spanish. If the user asks in English, answer in English.\n- For ambiguous wording, make a reasonable default when safe and state it. Ask a concise clarification only when the answer would be materially different.\n- For zonas problematicas, interpret this as zones with deteriorated or weak metrics using the diagnosis intent.\n- For inference questions, explain likely drivers as hypotheses based on observed metric relationships. Do not claim causality.\n- Include period, filters, aggregation method, and caveats when relevant.\n- Suggest 2 or 3 useful follow-up analyses after substantive answers.\n- If a chart is useful, describe the returned chart recommendation from the tool.\n- If the user asks to export, use Export Result with the query_id from the previous Query Ops Metrics response."
+            "systemMessage": "You are Rappi Ops Copilot, a bilingual Spanish/English analytics assistant for operations metrics.\n\nDeepSeek owns the analysis: interpret the user's natural language, choose the metrics/dimensions/time period, write the SQL, inspect the returned rows, and explain the answer. The API tools only expose schema, run read-only SQL, and export previous results.\n\nRules:\n- Always use tools before giving numeric answers.\n- Use Get Schema before writing SQL when you need table names, metric names, valid dimensions, country codes, segment labels, synonyms, or relative-week semantics.\n- Use Run SQL Analysis for every numeric answer, ranking, comparison, trend, aggregation, diagnosis, or export setup.\n- Generate your own Postgres SELECT/WITH SQL. Do not ask the user to provide SQL.\n- Do not invent metrics, calendar dates, denominators, causes, or unavailable dimensions.\n- The data uses relative weeks. L0W means the most recent available week. Last 8 weeks means L7W through L0W unless the user says otherwise.\n- If the user asks in Spanish, answer in Spanish. If the user asks in English, answer in English.\n- For ambiguous wording, make a reasonable default when safe and state it. Ask a concise clarification only when the answer would be materially different.\n- For zonas problematicas, decide the observable SQL logic yourself using deteriorated or weak metrics.\n- For inference questions, explain likely drivers as hypotheses based on observed metric relationships. Do not claim causality.\n- Include period, filters, aggregation method, and caveats when relevant.\n- Suggest 2 or 3 useful follow-up analyses after substantive answers.\n- If a chart is useful, describe the chart type and axes you recommend from the SQL result.\n- If the user asks to export, use Export Result with the query_id from the previous Run SQL Analysis response."
         }
       },
       "type": "@n8n/n8n-nodes-langchain.agent",
@@ -106,12 +106,12 @@
     },
     {
       "parameters": {
-        "toolDescription": "Execute a deterministic analytics query against Rappi operational metrics. Fill every placeholder with valid JSON according to the schema. Supported intents: lookup, rank, aggregate, compare, trend, segment, diagnose, growth, correlate. Metrics must use canonical names from Get Schema. n8n requires JSON placeholders to be objects, so pass arrays as wrappers: metrics {\"values\":[\"Lead Penetration\"]}, dimensions {\"values\":[\"country\"]}, sort {\"values\":[{\"field\":\"value\",\"direction\":\"desc\"}]}, diagnostic_metrics {\"values\":[]}. Relative period examples: current week {\"type\":\"relative_weeks\",\"start_offset\":0,\"end_offset\":0}; last 8 weeks {\"type\":\"relative_weeks\",\"start_offset\":7,\"end_offset\":0}; last 5 weeks {\"type\":\"relative_weeks\",\"start_offset\":4,\"end_offset\":0}. Filters can include country, city, zone, zone_type, zone_prioritization. Use country codes or country names.",
+        "toolDescription": "Run model-generated read-only Postgres SQL against the Rappi operations dataset. DeepSeek must choose the query logic. Use only SELECT or WITH SQL. Available core tables from Get Schema: dim_zone, semantic_metric, metric_synonym, fact_metric_week, fact_orders_week. Use week_offset = 0 for the latest week; use week_offset between 7 and 0 for the last 8 weeks. Join metric facts to dim_zone and semantic_metric. Join order facts to dim_zone. Never use write/admin SQL. Return enough rows to answer, but keep limits reasonable. Send SQL as a single-line JSON-safe string; use single quotes for SQL string literals and avoid double-quoted identifiers.",
         "method": "POST",
-        "url": "http://ops-api:8000/query",
+        "url": "http://ops-api:8000/sql",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"question\": \"{question}\",\n  \"language\": \"{language}\",\n  \"intent\": \"{intent}\",\n  \"metrics\": {metrics},\n  \"dimensions\": {dimensions},\n  \"filters\": {filters},\n  \"period\": {period},\n  \"aggregation\": \"{aggregation}\",\n  \"sort\": {sort},\n  \"limit\": {limit},\n  \"visualization\": \"{visualization}\",\n  \"outlier_policy\": \"{outlier_policy}\",\n  \"include_diagnostics\": {include_diagnostics},\n  \"diagnostic_metrics\": {diagnostic_metrics}\n}",
+        "jsonBody": "{\n  \"question\": \"{question}\",\n  \"sql\": \"{sql}\",\n  \"limit\": {limit},\n  \"visualization\": \"{visualization}\"\n}",
         "placeholderDefinitions": {
           "values": [
             {
@@ -120,69 +120,19 @@
               "description": "Original user question."
             },
             {
-              "name": "language",
+              "name": "sql",
               "type": "string",
-              "description": "Use es, en, or auto."
-            },
-            {
-              "name": "intent",
-              "type": "string",
-              "description": "One of lookup, rank, aggregate, compare, trend, segment, diagnose, growth, correlate."
-            },
-            {
-              "name": "metrics",
-              "type": "json",
-              "description": "JSON object wrapper with a values array of canonical metric names, for example {\"values\":[\"Lead Penetration\"]}. Use {\"values\":[]} only for diagnose when default diagnostic metrics are desired."
-            },
-            {
-              "name": "dimensions",
-              "type": "json",
-              "description": "JSON object wrapper with a values array of dimensions: country, city, zone, zone_type, zone_prioritization, week_offset, week_label."
-            },
-            {
-              "name": "filters",
-              "type": "json",
-              "description": "JSON object of filters, for example {\"country\":[\"MX\"],\"zone_type\":[\"Wealthy\"]}. Use {} when no filters are needed."
-            },
-            {
-              "name": "period",
-              "type": "json",
-              "description": "JSON object with type relative_weeks, start_offset, end_offset."
-            },
-            {
-              "name": "aggregation",
-              "type": "string",
-              "description": "One of none, avg, sum, min, max, median, pct_change, absolute_change."
-            },
-            {
-              "name": "sort",
-              "type": "json",
-              "description": "JSON object wrapper like {\"values\":[{\"field\":\"value\",\"direction\":\"desc\"}]}, or {\"values\":[]} for default sorting."
+              "description": "The read-only Postgres SELECT/WITH SQL generated by DeepSeek for this question. Send it as one line; use single quotes for string literals and avoid double-quoted identifiers."
             },
             {
               "name": "limit",
               "type": "number",
-              "description": "Maximum rows to return, 1 to 500."
+              "description": "Maximum rows to return, 1 to 1000."
             },
             {
               "name": "visualization",
               "type": "string",
-              "description": "One of table, bar, line, scatter, none."
-            },
-            {
-              "name": "outlier_policy",
-              "type": "string",
-              "description": "One of flag, exclude, none. Use flag for Lead Penetration unless the user asks otherwise."
-            },
-            {
-              "name": "include_diagnostics",
-              "type": "boolean",
-              "description": "true for inference/growth questions that ask what might explain the result."
-            },
-            {
-              "name": "diagnostic_metrics",
-              "type": "json",
-              "description": "JSON object wrapper with a values array of extra metrics to attach for diagnostics, or {\"values\":[]} when not needed."
+              "description": "Suggested display mode from DeepSeek: table, bar, line, scatter, or none."
             }
           ]
         },
@@ -195,11 +145,11 @@
         140
       ],
       "id": "d5422234-7145-4a91-b3f6-aaec3df5b79c",
-      "name": "Query Ops Metrics"
+      "name": "Run SQL Analysis"
     },
     {
       "parameters": {
-        "toolDescription": "Export a previous Query Ops Metrics result as CSV or PDF. Use the query_id from the previous tool response. Supported format values: csv, pdf.",
+        "toolDescription": "Export a previous Run SQL Analysis result as CSV or PDF. Use the query_id from the previous tool response. Supported format values: csv, pdf.",
         "method": "GET",
         "url": "http://ops-api:8000/exports/{query_id}.{format}",
         "placeholderDefinitions": {
@@ -207,7 +157,7 @@
             {
               "name": "query_id",
               "type": "string",
-              "description": "The query_id returned by Query Ops Metrics."
+              "description": "The query_id returned by Run SQL Analysis."
             },
             {
               "name": "format",
@@ -279,7 +229,7 @@
         ]
       ]
     },
-    "Query Ops Metrics": {
+    "Run SQL Analysis": {
       "ai_tool": [
         [
           {
