@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  ArrowUpRight,
   BarChart3,
   BotMessageSquare,
   Database,
@@ -107,6 +108,17 @@ export function WorkspaceTabs({ webhookUrl }: WorkspaceTabsProps) {
               );
             })}
           </div>
+
+          <a
+            className="workspace-n8n-link"
+            href="http://localhost:5678"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Workflow size={16} />
+            n8n
+            <ArrowUpRight size={14} />
+          </a>
         </div>
 
         <div className="workspace-tab-panel-shell">

@@ -1,4 +1,3 @@
-import { ArrowUpRight, Workflow } from "lucide-react";
 import { WorkspaceTabs } from "./components/WorkspaceTabs";
 
 const DEFAULT_WEBHOOK_URL =
@@ -13,17 +12,6 @@ export default function Home() {
   return (
     <main className="app-shell">
       <div className="ambient-grid" aria-hidden="true" />
-
-      <a
-        className="floating-n8n-link"
-        href="http://localhost:5678"
-        target="_blank"
-        rel="noreferrer"
-      >
-        <Workflow size={16} />
-        n8n
-        <ArrowUpRight size={14} />
-      </a>
 
       <WorkspaceTabs webhookUrl={webhookUrl} />
     </main>

@@ -137,38 +137,6 @@ svg {
   backdrop-filter: blur(18px);
 }
 
-.floating-n8n-link {
-  position: fixed;
-  top: 16px;
-  right: 18px;
-  z-index: 20;
-  display: inline-flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(17, 17, 17, 0.78);
-  color: var(--white-soft);
-  font-size: 0.86rem;
-  font-weight: 780;
-  padding: 0 13px;
-  backdrop-filter: blur(18px);
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.22);
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
-}
-
-.floating-n8n-link:hover {
-  border-color: var(--blue);
-  color: var(--foreground);
-  transform: translateY(-1px);
-}
-
 .mono-hero-tabs {
   position: relative;
   isolation: isolate;
@@ -181,7 +149,7 @@ svg {
   border: 0;
   border-radius: 0;
   background: #000000;
-  padding: 56px 32px 32px;
+  padding: 32px;
 }
 
 .mono-hero-content {
@@ -190,32 +158,35 @@ svg {
   display: grid;
   height: 100%;
   width: 100%;
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 22px;
 }
 
 .workspace-command-bar {
-  display: grid;
-  justify-items: center;
-  gap: 12px;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
   min-width: 0;
-  text-align: center;
+  padding: 10px 0;
+  text-align: left;
 }
 
 .mono-hero-title {
   display: grid;
   min-width: 0;
-  justify-items: center;
-  gap: 7px;
-  text-align: center;
+  justify-items: start;
+  gap: 10px;
+  text-align: left;
 }
 
 .mono-hero-title h2 {
   max-width: none;
   color: var(--foreground);
-  font-size: 2rem;
+  font-size: 2.24rem;
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1;
@@ -230,7 +201,7 @@ svg {
 }
 
 .mono-hero-title p {
-  max-width: 720px;
+  max-width: 260px;
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.35;
@@ -238,14 +209,17 @@ svg {
 
 .workspace-tab-list {
   display: flex;
+  width: 100%;
+  max-width: 220px;
+  flex-direction: column;
   flex-wrap: wrap;
-  justify-content: center;
   gap: 8px;
 }
 
 .workspace-tab {
   display: inline-flex;
   min-height: 42px;
+  width: 100%;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -265,6 +239,36 @@ svg {
     transform 160ms ease;
 }
 
+.workspace-n8n-link {
+  display: inline-flex;
+  min-height: 42px;
+  width: 100%;
+  max-width: 220px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(17, 17, 17, 0.78);
+  color: var(--white-soft);
+  font-size: 0.86rem;
+  font-weight: 780;
+  padding: 0 13px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.22);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.workspace-n8n-link:hover {
+  border-color: var(--blue);
+  color: var(--foreground);
+  transform: translateY(-1px);
+}
+
 .workspace-tab:hover {
   border-color: rgba(255, 255, 255, 0.32);
   color: var(--foreground);
@@ -278,6 +282,7 @@ svg {
 }
 
 .workspace-tab-panel-shell {
+  height: 100%;
   min-height: 0;
   width: 100%;
 }
@@ -1688,9 +1693,7 @@ svg {
     justify-content: flex-start;
   }
 
-  .floating-n8n-link {
-    top: 12px;
-    right: 12px;
+  .workspace-n8n-link {
     min-height: 38px;
   }
 
@@ -1706,19 +1709,27 @@ svg {
 
   .mono-hero-content {
     height: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 12px;
   }
 
   .workspace-command-bar {
-    grid-template-columns: 1fr;
-    justify-items: center;
+    align-items: center;
+    justify-content: start;
     gap: 12px;
+    padding: 0;
+    text-align: center;
   }
 
   .mono-hero-title {
     justify-items: center;
     gap: 10px;
     text-align: center;
+  }
+
+  .mono-hero-title p {
+    max-width: 620px;
   }
 
   .mono-hero-title h2 {
@@ -1730,11 +1741,22 @@ svg {
   }
 
   .workspace-tab-list {
+    max-width: none;
+    flex-direction: row;
     overflow-x: auto;
     justify-content: center;
     flex-wrap: nowrap;
     width: 100%;
     padding-bottom: 2px;
+  }
+
+  .workspace-tab {
+    width: auto;
+    flex: 0 0 auto;
+  }
+
+  .workspace-n8n-link {
+    max-width: 180px;
   }
 
   .chat-panel.tab-chat-panel,
