@@ -8,6 +8,7 @@ The project uses n8n orchestration, DeepSeek `deepseek-v4-pro`, and model-genera
 
 - `data/`: source workbook with dummy operational metrics.
 - `docs/n8n-rappi-ops-copilot-design.md`: architecture and workflow design for the n8n chatbot.
+- `frontend/`: Next.js embedded chat UI for the n8n Chat Trigger.
 - `ops_copilot/`: analytics API, workbook loader, Postgres loader, and SQL execution guardrails.
 - `workflows/`: n8n importable chat-agent workflow template.
 - `db/schema.sql`: Postgres semantic schema.
@@ -21,7 +22,7 @@ Create a local environment file:
 cp .env.example .env
 ```
 
-Start Postgres, the analytics API, and n8n:
+Start Postgres, the analytics API, n8n, and the Next.js web UI:
 
 ```bash
 docker compose up --build
@@ -33,6 +34,12 @@ Open n8n:
 http://localhost:5678
 ```
 
+Open the embedded chat UI:
+
+```text
+http://localhost:3000
+```
+
 Import:
 
 ```bash
@@ -42,6 +49,14 @@ python3 scripts/setup_n8n.py --activate
 This imports or updates the n8n credentials and workflow from `.env` without
 committing secrets. You can also import `workflows/rappi_ops_chat_agent.json`
 manually and create the credentials described in `workflows/README.md`.
+
+The web UI embeds the workflow's public Chat Trigger through
+`NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL`. The local default points to the committed
+workflow webhook ID:
+
+```text
+http://localhost:5678/webhook/b2a0878f-58c7-4f89-a98b-2dc29cd637a8/chat
+```
 
 ## Analytics API
 

@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 node_modules/
+.next/
+.turbo/
+dist/
 .venv/
 __pycache__/
 *.py[cod]
