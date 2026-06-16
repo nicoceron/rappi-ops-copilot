@@ -71,7 +71,7 @@ type StructuredContent = {
 const SESSION_STORAGE_KEY = "rappi-ops-copilot-session-id";
 const HISTORY_STORAGE_KEY = "rappi-ops-copilot-chat-history";
 const MAX_STORED_MESSAGES = 30;
-const CHART_COLORS = ["#0f7b4c", "#2765d8", "#e9483f", "#a95011"];
+const CHART_COLORS = ["#7ec4e3", "#7eea9b", "#f2b76c", "#fafafa"];
 const quickPrompts = [
   "¿Cuál es el promedio de Lead Penetration por país?",
   "Muestra la evolución de Gross Profit UE en Chapinero últimas 8 semanas",
@@ -254,7 +254,7 @@ export function N8nChat({ webhookUrl }: N8nChatProps) {
             </span>
             <div className="message-bubble message-bubble-bot message-bubble-loading">
               <LoaderCircle className="spin" size={16} />
-              <span>Analyzing operations data...</span>
+              <span>Reading operations data...</span>
             </div>
           </div>
         ) : null}
@@ -377,10 +377,19 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
         <ResponsiveContainer width="100%" height="100%">
           {isLine ? (
             <LineChart data={chart.data} margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(21,23,19,0.12)" />
-              <XAxis dataKey={chart.xKey} tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} width={42} />
-              <Tooltip />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#ffffff99", fontSize: 11 }} width={42} />
+              <Tooltip
+                contentStyle={{
+                  background: "#111111",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 8,
+                  color: "#fafafa",
+                }}
+                itemStyle={{ color: "#fafafa" }}
+                labelStyle={{ color: "#ffffff99" }}
+              />
               {chart.yKeys.map((key, index) => (
                 <Line
                   key={key}
@@ -395,10 +404,19 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
             </LineChart>
           ) : (
             <BarChart data={chart.data} margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(21,23,19,0.12)" />
-              <XAxis dataKey={chart.xKey} tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} width={42} />
-              <Tooltip />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#ffffff99", fontSize: 11 }} width={42} />
+              <Tooltip
+                contentStyle={{
+                  background: "#111111",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 8,
+                  color: "#fafafa",
+                }}
+                itemStyle={{ color: "#fafafa" }}
+                labelStyle={{ color: "#ffffff99" }}
+              />
               {chart.yKeys.map((key, index) => (
                 <Bar key={key} dataKey={key} radius={[5, 5, 0, 0]}>
                   {chart.data.map((_, cellIndex) => (
@@ -421,7 +439,12 @@ function ExportLinks({ exports }: { exports: ExportLink[] }) {
   return (
     <div className="export-link-row">
       {exports.map((exportLink) => (
-        <a key={`${exportLink.kind}-${exportLink.href}`} href={exportLink.href} target="_blank" rel="noreferrer">
+        <a
+          key={`${exportLink.kind}-${exportLink.href}`}
+          href={exportLink.href}
+          target="_blank"
+          rel="noreferrer"
+        >
           {exportLink.kind === "pdf" ? <FileText size={15} /> : <Download size={15} />}
           {exportLink.label}
         </a>
