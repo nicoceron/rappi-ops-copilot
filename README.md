@@ -35,11 +35,13 @@ http://localhost:5678
 
 Import:
 
-```text
-workflows/rappi_ops_chat_agent.json
+```bash
+python3 scripts/setup_n8n.py --activate
 ```
 
-Then create the credentials described in `workflows/README.md`.
+This imports or updates the n8n credentials and workflow from `.env` without
+committing secrets. You can also import `workflows/rappi_ops_chat_agent.json`
+manually and create the credentials described in `workflows/README.md`.
 
 ## Analytics API
 
@@ -83,14 +85,14 @@ curl -OJ http://localhost:8000/exports/<query_id>.pdf
 Dry-run workbook normalization:
 
 ```bash
-python scripts/ingest_workbook.py --dry-run
+python3 scripts/ingest_workbook.py --dry-run
 ```
 
 Load Postgres:
 
 ```bash
 DATABASE_URL=postgresql://rappi:rappi@localhost:5432/rappi_ops \
-python scripts/ingest_workbook.py
+python3 scripts/ingest_workbook.py
 ```
 
 The API currently reads the workbook directly for a zero-config demo. The Postgres schema and ingestion path are included so the data layer can be moved fully into Postgres as the workflow hardens.
@@ -100,7 +102,7 @@ The API currently reads the workbook directly for a zero-config demo. The Postgr
 Run deterministic smoke tests against the workbook:
 
 ```bash
-python scripts/smoke_test.py
+python3 scripts/smoke_test.py
 ```
 
 This covers rankings, comparisons, trends, country aggregation, high/low segmentation, growth diagnostics, and problematic-zone scoring.
