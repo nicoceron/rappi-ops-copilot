@@ -47,9 +47,6 @@ export function WorkspaceTabs({ webhookUrl }: WorkspaceTabsProps) {
             <h2>
               Ask <span>operations data</span>
             </h2>
-            <p>
-              Weak zones, KPI rankings, trend diagnostics, charts, CSV exports, and PDF summaries.
-            </p>
           </div>
 
           <div className="workspace-tab-list" role="tablist" aria-label="Workspace tabs">

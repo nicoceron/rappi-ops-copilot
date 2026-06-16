@@ -30,4 +30,5 @@ export type InsightReport = {
   period_label: string;
   executive_summary: Finding[];
   categories: InsightCategory[];
+  data_caveats?: string[];
 };
