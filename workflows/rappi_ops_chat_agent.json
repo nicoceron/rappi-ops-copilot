@@ -106,7 +106,7 @@
     },
     {
       "parameters": {
-        "toolDescription": "Execute a deterministic analytics query against Rappi operational metrics. Fill every placeholder with valid JSON according to the schema. Supported intents: lookup, rank, aggregate, compare, trend, segment, diagnose, growth, correlate. Metrics must use canonical names from Get Schema. Relative period examples: current week {\"type\":\"relative_weeks\",\"start_offset\":0,\"end_offset\":0}; last 8 weeks {\"type\":\"relative_weeks\",\"start_offset\":7,\"end_offset\":0}; last 5 weeks {\"type\":\"relative_weeks\",\"start_offset\":4,\"end_offset\":0}. Filters can include country, city, zone, zone_type, zone_prioritization. Use country codes or country names.",
+        "toolDescription": "Execute a deterministic analytics query against Rappi operational metrics. Fill every placeholder with valid JSON according to the schema. Supported intents: lookup, rank, aggregate, compare, trend, segment, diagnose, growth, correlate. Metrics must use canonical names from Get Schema. n8n requires JSON placeholders to be objects, so pass arrays as wrappers: metrics {\"values\":[\"Lead Penetration\"]}, dimensions {\"values\":[\"country\"]}, sort {\"values\":[{\"field\":\"value\",\"direction\":\"desc\"}]}, diagnostic_metrics {\"values\":[]}. Relative period examples: current week {\"type\":\"relative_weeks\",\"start_offset\":0,\"end_offset\":0}; last 8 weeks {\"type\":\"relative_weeks\",\"start_offset\":7,\"end_offset\":0}; last 5 weeks {\"type\":\"relative_weeks\",\"start_offset\":4,\"end_offset\":0}. Filters can include country, city, zone, zone_type, zone_prioritization. Use country codes or country names.",
         "method": "POST",
         "url": "http://ops-api:8000/query",
         "sendBody": true,
@@ -132,12 +132,12 @@
             {
               "name": "metrics",
               "type": "json",
-              "description": "JSON array of canonical metric names, for example [\"Lead Penetration\"]. Use [] only for diagnose when default diagnostic metrics are desired."
+              "description": "JSON object wrapper with a values array of canonical metric names, for example {\"values\":[\"Lead Penetration\"]}. Use {\"values\":[]} only for diagnose when default diagnostic metrics are desired."
             },
             {
               "name": "dimensions",
               "type": "json",
-              "description": "JSON array of dimensions: country, city, zone, zone_type, zone_prioritization, week_offset, week_label."
+              "description": "JSON object wrapper with a values array of dimensions: country, city, zone, zone_type, zone_prioritization, week_offset, week_label."
             },
             {
               "name": "filters",
@@ -157,7 +157,7 @@
             {
               "name": "sort",
               "type": "json",
-              "description": "JSON array like [{\"field\":\"value\",\"direction\":\"desc\"}], or [] for default sorting."
+              "description": "JSON object wrapper like {\"values\":[{\"field\":\"value\",\"direction\":\"desc\"}]}, or {\"values\":[]} for default sorting."
             },
             {
               "name": "limit",
@@ -182,7 +182,7 @@
             {
               "name": "diagnostic_metrics",
               "type": "json",
-              "description": "JSON array of extra metrics to attach for diagnostics, or [] when not needed."
+              "description": "JSON object wrapper with a values array of extra metrics to attach for diagnostics, or {\"values\":[]} when not needed."
             }
           ]
         },

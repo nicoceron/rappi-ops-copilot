@@ -60,6 +60,18 @@ def main() -> None:
             ),
         ),
         (
+            "n8n wrapped lead avg country",
+            SemanticQuery(
+                intent="aggregate",
+                metrics={"values": ["Lead Penetration"]},
+                dimensions={"values": ["country"]},
+                sort={"values": []},
+                diagnostic_metrics={"values": []},
+                aggregation="avg",
+                visualization="bar",
+            ),
+        ),
+        (
             "high lead low perfect",
             SemanticQuery(
                 intent="segment",
@@ -101,4 +113,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

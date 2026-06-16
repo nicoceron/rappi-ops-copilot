@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -72,7 +73,46 @@ class SemanticQuery(BaseModel):
         if value is None:
             return []
         if isinstance(value, str):
-            return [value]
+            text = value.strip()
+            if not text or text in {"[]", "{}"}:
+                return []
+            try:
+                return cls.coerce_string_list(json.loads(text))
+            except json.JSONDecodeError:
+                return [value]
+        if isinstance(value, dict):
+            if not value:
+                return []
+            for key in ("values", "items", "metrics", "dimensions", "diagnostic_metrics"):
+                if key in value:
+                    return cls.coerce_string_list(value[key])
+            if all(str(key).isdigit() for key in value):
+                return [str(value[key]) for key in sorted(value, key=lambda item: int(str(item)))]
+            return [str(item) for item in value.values() if item is not None and str(item).strip()]
+        return [str(item) for item in value if item is not None and str(item).strip()]
+
+    @field_validator("sort", mode="before")
+    @classmethod
+    def coerce_sort_list(cls, value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if not text or text in {"[]", "{}"}:
+                return []
+            try:
+                return cls.coerce_sort_list(json.loads(text))
+            except json.JSONDecodeError:
+                return [{"field": value, "direction": "desc"}]
+        if isinstance(value, dict):
+            if not value:
+                return []
+            for key in ("values", "items", "sort"):
+                if key in value:
+                    return cls.coerce_sort_list(value[key])
+            if "field" in value:
+                return [value]
+            return list(value.values())
         return list(value)
 
 
@@ -95,4 +135,3 @@ class QueryResult(BaseModel):
     caveats: list[str] = Field(default_factory=list)
     suggested_followups: list[str] = Field(default_factory=list)
     row_count: int
-
