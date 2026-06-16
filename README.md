@@ -1,4 +1,5 @@
 # Rappi Ops Copilot
+<img width="4112" height="2412" alt="Screenshot 2026-06-16 at 12 41 06 PM" src="https://github.com/user-attachments/assets/38e48930-9f32-401e-b870-e682e7e16957" />
 
 Conversational analytics assistant for Rappi operational metrics.
 
