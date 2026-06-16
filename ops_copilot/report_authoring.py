@@ -270,6 +270,7 @@ def _compact_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "pearson_correlation",
         "n_zones",
         "low_low_count",
+        "low_low_examples",
         "opportunity_score",
         "avg_metric_risk",
         "max_deterioration_pct",

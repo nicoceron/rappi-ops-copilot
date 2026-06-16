@@ -16,6 +16,110 @@ from ops_copilot.query_engine import QueryEngine
 from ops_copilot.settings import default_data_file
 
 
+EXPECTED_INSIGHT_CATEGORIES = {
+    "anomalies",
+    "worrying_trends",
+    "benchmarking",
+    "correlations",
+    "opportunities",
+}
+
+
+def verify_insight_contract(report) -> dict[str, int]:
+    category_map = {category.key: category for category in report.categories}
+    category_counts = {
+        key: len(category_map[key].findings)
+        for key in sorted(category_map)
+    }
+    if set(category_map) != EXPECTED_INSIGHT_CATEGORIES:
+        raise SystemExit(f"insights: unexpected categories {sorted(category_map)}")
+
+    empty_categories = [
+        key
+        for key in EXPECTED_INSIGHT_CATEGORIES
+        if not category_map[key].findings
+    ]
+    if empty_categories:
+        raise SystemExit(f"insights: expected findings for categories {empty_categories}")
+
+    summary_categories = {finding.category for finding in report.executive_summary}
+    missing_summary_categories = EXPECTED_INSIGHT_CATEGORIES - summary_categories
+    if missing_summary_categories:
+        raise SystemExit(
+            "insights: executive summary should surface every required category, "
+            f"missing {sorted(missing_summary_categories)}"
+        )
+
+    for finding in category_map["anomalies"].findings:
+        evidence = finding.evidence
+        if abs(float(evidence.get("change_score", 0))) < 0.10:
+            raise SystemExit("insights: anomaly below 10% week-over-week threshold")
+        if evidence.get("previous_week") != "L1W" or evidence.get("current_week") != "L0W":
+            raise SystemExit("insights: anomaly should compare L1W to L0W")
+
+    for finding in category_map["worrying_trends"].findings:
+        evidence = finding.evidence
+        values = evidence.get("values", {})
+        required_weeks = ["L3W", "L2W", "L1W", "L0W"]
+        if not all(week in values for week in required_weeks):
+            raise SystemExit("insights: trend missing 3-week deterioration history")
+        ordered = [float(values[week]) for week in required_weeks]
+        direction = evidence.get("direction")
+        if direction == "higher_better" and not (ordered[0] > ordered[1] > ordered[2] > ordered[3]):
+            raise SystemExit("insights: higher-is-better trend is not consistently deteriorating")
+        if direction == "lower_better" and not (ordered[0] < ordered[1] < ordered[2] < ordered[3]):
+            raise SystemExit("insights: lower-is-better trend is not consistently deteriorating")
+
+    for finding in category_map["benchmarking"].findings:
+        evidence = finding.evidence
+        if int(evidence.get("peer_n", 0)) < 5:
+            raise SystemExit("insights: benchmark should use a same-country/type peer group")
+        if float(evidence.get("underperformance_score", 0)) < 0.15:
+            raise SystemExit("insights: benchmark gap is below divergence threshold")
+        if not evidence.get("country") or not evidence.get("zone_type"):
+            raise SystemExit("insights: benchmark evidence must include country and zone type")
+
+    correlations = category_map["correlations"].findings
+    for finding in correlations:
+        evidence = finding.evidence
+        if int(evidence.get("n_zones", 0)) < 25:
+            raise SystemExit("insights: correlation should be computed across enough zones")
+        if "pearson_correlation" not in evidence:
+            raise SystemExit("insights: correlation missing Pearson evidence")
+        if int(evidence.get("low_low_count", 0)) <= 0:
+            raise SystemExit("insights: correlation should include low-low zone count")
+        if not evidence.get("low_low_examples"):
+            raise SystemExit("insights: correlation should include low-low zone examples")
+
+    has_lead_conversion_relationship = any(
+        "Lead Penetration" in {
+            finding.evidence.get("metric_x"),
+            finding.evidence.get("metric_y"),
+        }
+        and any(
+            token in str(finding.evidence.get(metric_name_key, ""))
+            for metric_name_key in ["metric_x", "metric_y"]
+            for token in ["CVR", "Conversion"]
+        )
+        for finding in correlations
+    )
+    if not has_lead_conversion_relationship:
+        raise SystemExit("insights: expected Lead Penetration versus conversion correlation")
+
+    for finding in category_map["opportunities"].findings:
+        evidence = finding.evidence
+        if float(evidence.get("opportunity_score", 0)) <= 0:
+            raise SystemExit("insights: opportunity should include a positive score")
+        if not evidence.get("weak_metrics"):
+            raise SystemExit("insights: opportunity should include weakest metric cluster")
+
+    for category in report.categories:
+        if category.title not in report.markdown:
+            raise SystemExit(f"insights: markdown missing section {category.title}")
+
+    return category_counts
+
+
 def main() -> None:
     engine = QueryEngine(load_workbook(default_data_file()))
     duplicate_metric_facts = engine.dataset.metric_facts.duplicated(
@@ -198,16 +302,7 @@ def main() -> None:
         print(f"ok {name}: {result.row_count} rows ({result.answer_type})")
 
     report = generate_executive_insight_report(engine.dataset, source="smoke_test")
-    category_counts = {category.key: len(category.findings) for category in report.categories}
-    expected_categories = {
-        "anomalies",
-        "worrying_trends",
-        "benchmarking",
-        "correlations",
-        "opportunities",
-    }
-    if set(category_counts) != expected_categories:
-        raise SystemExit(f"insights: unexpected categories {sorted(category_counts)}")
+    category_counts = verify_insight_contract(report)
     if not report.executive_summary:
         raise SystemExit("insights: expected executive summary findings")
     if "# Rappi Ops Executive Insight Report" not in report.markdown:

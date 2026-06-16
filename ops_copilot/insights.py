@@ -1008,7 +1008,9 @@ def _correlation_findings(
     for metric_x, metric_y in CORRELATION_PAIRS:
         if metric_x not in pivot.columns or metric_y not in pivot.columns:
             continue
-        pair = pivot[["zone_id", "country", "city", "zone", metric_x, metric_y]].dropna()
+        pair = pivot[
+            ["zone_id", "country", "city", "zone", "zone_type", metric_x, metric_y]
+        ].dropna()
         if len(pair) < 25:
             continue
         corr = pair[metric_x].corr(pair[metric_y])
@@ -1017,6 +1019,7 @@ def _correlation_findings(
         x_p25 = pair[metric_x].quantile(0.25)
         y_p25 = pair[metric_y].quantile(0.25)
         low_low = pair[(pair[metric_x] <= x_p25) & (pair[metric_y] <= y_p25)]
+        low_low_examples = _low_low_zone_examples(low_low, metric_x, metric_y)
         rows.append(
             {
                 "metric_x": metric_x,
@@ -1024,6 +1027,7 @@ def _correlation_findings(
                 "corr": float(corr),
                 "n_zones": int(len(pair)),
                 "low_low_count": int(len(low_low)),
+                "low_low_examples": low_low_examples,
                 "x_p25": float(x_p25),
                 "y_p25": float(y_p25),
             }
@@ -1040,6 +1044,10 @@ def _correlation_findings(
             f"Across {row['n_zones']} zones, Pearson correlation is "
             f"{row['corr']:.2f}. {row['low_low_count']} zones sit in the bottom quartile of both metrics."
         )
+        examples = row["low_low_examples"][:3]
+        if examples:
+            example_zones = ", ".join(str(item["zone"]) for item in examples)
+            summary += f" Example low-low zones: {example_zones}."
         findings.append(
             InsightFinding(
                 id=_finding_id("correlation", title, index),
@@ -1056,12 +1064,37 @@ def _correlation_findings(
                     "pearson_correlation": _safe_float(row["corr"]),
                     "n_zones": row["n_zones"],
                     "low_low_count": row["low_low_count"],
+                    "low_low_examples": row["low_low_examples"],
                     "metric_x_p25": _safe_float(row["x_p25"]),
                     "metric_y_p25": _safe_float(row["y_p25"]),
                 },
             )
         )
     return findings
+
+
+def _low_low_zone_examples(
+    low_low: pd.DataFrame, metric_x: str, metric_y: str, limit: int = 5
+) -> list[dict[str, Any]]:
+    if low_low.empty:
+        return []
+
+    examples = (
+        low_low.assign(low_low_rank=low_low[metric_x].rank() + low_low[metric_y].rank())
+        .sort_values(["low_low_rank", metric_x, metric_y])
+        .head(limit)
+    )
+    return [
+        {
+            "country": row["country"],
+            "city": row["city"],
+            "zone": row["zone"],
+            "zone_type": row["zone_type"],
+            "metric_x_value": _safe_float(row[metric_x]),
+            "metric_y_value": _safe_float(row[metric_y]),
+        }
+        for row in examples.to_dict(orient="records")
+    ]
 
 
 def _opportunity_findings(

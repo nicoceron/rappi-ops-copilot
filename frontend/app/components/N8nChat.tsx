@@ -87,9 +87,12 @@ const PLACEHOLDER_EXPORT_HOSTS = new Set([
 ]);
 const CHART_COLORS = ["#7ec4e3", "#7eea9b", "#f2b76c", "#fafafa"];
 const quickPrompts = [
-  "¿Cuál es el promedio de Lead Penetration por país?",
-  "Muestra la evolución de Gross Profit UE en Chapinero últimas 8 semanas",
+  "¿Cuáles son las 5 zonas con mayor % Lead Penetration esta semana?",
   "Compara el Perfect Order entre zonas Wealthy y Non Wealthy en México",
+  "Muestra la evolución de Gross Profit UE en Chapinero últimas 8 semanas",
+  "¿Cuál es el promedio de Lead Penetration por país?",
+  "¿Qué zonas tienen alto Lead Penetration pero bajo Perfect Order?",
+  "¿Cuáles son las zonas que más crecen en órdenes en las últimas 5 semanas y qué podría explicar el crecimiento?",
 ];
 
 const initialMessages: ChatMessage[] = [
