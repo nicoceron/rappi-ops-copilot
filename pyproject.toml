@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rappi-ops-copilot"
 version = "0.1.0"
-description = "Deterministic analytics API and n8n workflow assets for the Rappi Ops Copilot."
+description = "Reproducible conversational analytics prototype for Rappi operations, with FastAPI, n8n workflows, DeepSeek orchestration, and a Next.js UI."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -30,4 +30,3 @@ include = ["ops_copilot*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-
