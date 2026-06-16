@@ -4,10 +4,6 @@
 
 # Rappi Ops Copilot
 
-<p align="center">
-  <img width="960" alt="Rappi Ops Copilot interface screenshot" src="https://github.com/user-attachments/assets/38e48930-9f32-401e-b870-e682e7e16957" />
-</p>
-
 Rappi Ops Copilot is a reproducible conversational analytics prototype for operational KPI analysis. It combines a deterministic FastAPI analytics service, importable n8n workflows, DeepSeek-powered natural-language orchestration, and a Next.js web interface for asking questions, reviewing executive insights, and exporting results.
 
 The solution is designed for an operations user who wants to ask questions such as "Which zones have the lowest Perfect Orders?", "Compare wealthy vs non-wealthy zones in Mexico", or "Show the latest executive insight report" without writing SQL.
