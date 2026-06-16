@@ -9,6 +9,7 @@ import pandas as pd
 from ops_copilot.data_loader import (
     DIMENSION_COLUMNS,
     OperationalDataset,
+    normalize_alias_key,
     normalize_text,
     resolve_country,
 )
@@ -24,6 +25,16 @@ DEFAULT_DIAGNOSTIC_METRICS = [
 
 class QueryValidationError(ValueError):
     """Raised when the semantic query cannot be safely executed."""
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen = set()
+    deduped = []
+    for item in items:
+        if item and item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    return deduped
 
 
 class QueryEngine:
@@ -58,23 +69,22 @@ class QueryEngine:
         dimensions = self._dimensions_or_default(query.dimensions, ["country", "city", "zone"])
         facts, filters_applied = self._metric_rows(metric_key, query)
         value_column = "value"
+        caveats = self._caveats(metric_key, query, facts)
 
         if query.aggregation == "none" and query.period.start_offset == query.period.end_offset:
-            grouped = facts[dimensions + [value_column]].copy()
+            selected_columns = dimensions + [value_column]
+            if "is_outlier" in facts.columns:
+                selected_columns.append("is_outlier")
+            grouped = facts[selected_columns].copy()
             if "zone" in grouped.columns:
                 grouped = grouped.drop_duplicates(dimensions)
         else:
             aggregation = "avg" if query.aggregation == "none" else query.aggregation
             grouped = self._aggregate_frame(facts, dimensions, value_column, aggregation)
 
-        grouped = self._mark_outliers(grouped, metric_key, "value", query.outlier_policy)
-        if query.outlier_policy == "exclude" and "is_outlier" in grouped.columns:
-            grouped = grouped[~grouped["is_outlier"]]
-
         sort_field = self._sort_field(query, default="value")
         grouped = self._sort_rows(grouped, sort_field, query.limit)
         rows = self._records(grouped)
-        caveats = self._caveats(metric_key, query, grouped)
         metric_name = self._metric_name(metric_key)
         return self._result(
             query=query,
@@ -96,9 +106,11 @@ class QueryEngine:
         aggregation = "avg" if query.aggregation == "none" else query.aggregation
         frames = []
         filters_applied: dict[str, list[str]] = {}
+        caveats = self._common_caveats(query)
 
         for metric_key in metric_keys:
             facts, filters_applied = self._metric_rows(metric_key, query)
+            caveats.extend(self._caveats(metric_key, query, facts, include_common=False))
             grouped = self._aggregate_frame(facts, dimensions, "value", aggregation)
             grouped.insert(0, "metric", self._metric_name(metric_key))
             frames.append(grouped)
@@ -113,7 +125,7 @@ class QueryEngine:
             rows=rows,
             filters_applied=filters_applied,
             chart=self._chart(rows, query.visualization or "bar", x=self._best_label(dimensions), y="value"),
-            caveats=self._common_caveats(query),
+            caveats=_dedupe(caveats),
             suggestions=[
                 "Bajar al detalle por ciudad o zona",
                 "Comparar contra la tendencia de las ultimas 8 semanas",
@@ -127,9 +139,11 @@ class QueryEngine:
         group_dimensions = dimensions + ["week_offset", "week_label"]
         frames = []
         filters_applied: dict[str, list[str]] = {}
+        caveats = self._common_caveats(query)
 
         for metric_key in metric_keys:
             facts, filters_applied = self._metric_rows(metric_key, query)
+            caveats.extend(self._caveats(metric_key, query, facts, include_common=False))
             aggregation = "avg" if query.aggregation == "none" else query.aggregation
             grouped = self._aggregate_frame(facts, group_dimensions, "value", aggregation)
             grouped.insert(0, "metric", self._metric_name(metric_key))
@@ -144,7 +158,7 @@ class QueryEngine:
             rows=rows,
             filters_applied=filters_applied,
             chart=self._chart(rows, "line", x="week_label", y="value", series="metric"),
-            caveats=self._common_caveats(query),
+            caveats=_dedupe(caveats),
             suggestions=[
                 "Comparar esta tendencia contra zonas similares",
                 "Ver las zonas que mas se deterioraron en el periodo",
@@ -159,6 +173,10 @@ class QueryEngine:
         x_key, y_key = metric_keys[:2]
         x_rows, filters_applied = self._metric_rows(x_key, query)
         y_rows, _ = self._metric_rows(y_key, query)
+        caveats = _dedupe(
+            self._caveats(x_key, query, x_rows)
+            + self._caveats(y_key, query, y_rows, include_common=False)
+        )
 
         x_current = self._current_zone_values(x_rows, x_key, "x_value")
         y_current = self._current_zone_values(y_rows, y_key, "y_value")
@@ -188,7 +206,8 @@ class QueryEngine:
                 x=self._metric_name(x_key),
                 y=self._metric_name(y_key),
             ),
-            caveats=[
+            caveats=caveats
+            + [
                 f"High {self._metric_name(x_key)} means >= p75 ({x_threshold:.4g}) within the filtered universe.",
                 f"Low {self._metric_name(y_key)} means <= p25 ({y_threshold:.4g}) within the filtered universe.",
             ],
@@ -253,10 +272,12 @@ class QueryEngine:
         filters_applied = self._filters_applied(zones, query.filters)
         metric_keys = self._metric_keys(query.metrics or DEFAULT_DIAGNOSTIC_METRICS)
         current_values = []
+        caveats = self._common_caveats(query)
 
         for metric_key in metric_keys:
             q = query.model_copy(update={"metrics": [metric_key], "period": query.period})
             facts, _ = self._metric_rows(metric_key, q)
+            caveats.extend(self._caveats(metric_key, query, facts, include_common=False))
             current = self._current_zone_values(facts, metric_key, metric_key)
             metadata = self._metric_metadata(metric_key)
             direction = metadata["default_direction"]
@@ -302,10 +323,13 @@ class QueryEngine:
             rows=rows,
             filters_applied=filters_applied,
             chart=self._chart(rows, "bar", x="zone", y="problem_score"),
-            caveats=[
-                "Problematic zones are scored from weak current metrics, order growth risk, and prioritization.",
-                "The scoring definition should be calibrated with business owners before production use.",
-            ],
+            caveats=_dedupe(
+                caveats
+                + [
+                    "Problematic zones are scored from weak current metrics, order growth risk, and prioritization.",
+                    "The scoring definition should be calibrated with business owners before production use.",
+                ]
+            ),
             suggestions=[
                 "Ver el detalle de cada metrica para las primeras zonas",
                 "Separar zonas Wealthy y Non Wealthy",
@@ -320,6 +344,11 @@ class QueryEngine:
         x_key, y_key = metric_keys[:2]
         x_rows, filters_applied = self._metric_rows(x_key, query)
         y_rows, _ = self._metric_rows(y_key, query)
+        caveats = _dedupe(
+            self._caveats(x_key, query, x_rows)
+            + self._caveats(y_key, query, y_rows, include_common=False)
+            + ["Correlation is not causation."]
+        )
         joined = self._current_zone_values(x_rows, x_key, "x_value").merge(
             self._current_zone_values(y_rows, y_key, "y_value"),
             on=["zone_id", "country", "city", "zone"],
@@ -352,7 +381,7 @@ class QueryEngine:
                 x=self._metric_name(x_key),
                 y=self._metric_name(y_key),
             ),
-            caveats=["Correlation is not causation."],
+            caveats=caveats,
             suggestions=[
                 "Revisar outliers que puedan explicar la correlacion",
                 "Calcular la correlacion por pais",
@@ -363,10 +392,21 @@ class QueryEngine:
         metric_keys = self._metric_keys(query.metrics)
         frames = []
         filters_applied: dict[str, list[str]] = {}
+        caveats = self._common_caveats(query)
         for metric_key in metric_keys:
             facts, filters_applied = self._metric_rows(metric_key, query)
+            caveats.extend(self._caveats(metric_key, query, facts, include_common=False))
             frame = facts[
-                ["country", "city", "zone", "zone_type", "zone_prioritization", "week_label", "value"]
+                [
+                    "country",
+                    "city",
+                    "zone",
+                    "zone_type",
+                    "zone_prioritization",
+                    "week_label",
+                    "value",
+                    "is_outlier",
+                ]
             ].copy()
             frame.insert(0, "metric", self._metric_name(metric_key))
             frames.append(frame)
@@ -378,7 +418,7 @@ class QueryEngine:
             rows=rows,
             filters_applied=filters_applied,
             chart=self._chart(rows, "table"),
-            caveats=self._common_caveats(query),
+            caveats=_dedupe(caveats),
             suggestions=[
                 "Ver la tendencia de este resultado",
                 "Compararlo contra zonas similares",
@@ -396,28 +436,42 @@ class QueryEngine:
             facts["metric_key"] = "orders"
             facts["metric_name"] = "Orders"
             facts["value"] = facts["orders"]
+            facts["is_outlier"] = False
         else:
             facts = self.dataset.metric_facts[
                 (self.dataset.metric_facts["metric_key"] == metric_key)
                 & (self.dataset.metric_facts["week_offset"].isin(offsets))
             ].copy()
+            if "is_outlier" not in facts.columns:
+                facts["is_outlier"] = False
         facts = facts.merge(zones, on="zone_id", how="inner")
+        outlier_count = int(facts["is_outlier"].fillna(False).sum())
+        if query.outlier_policy == "exclude" and outlier_count:
+            facts = facts[~facts["is_outlier"].fillna(False)].copy()
         if facts.empty:
             raise QueryValidationError("No rows matched the selected filters and period.")
+        facts.attrs["outlier_count"] = outlier_count
         return facts, filters_applied
 
     def _filtered_zones(self, filters: dict[str, list[str] | str]) -> pd.DataFrame:
         zones = self.dataset.zones.copy()
+        country_filter_values = self._country_filter_values(filters)
         for raw_key, raw_value in filters.items():
             key = normalize_text(raw_key).replace(" ", "_")
             if key not in {"country", "city", "zone", "zone_type", "zone_prioritization"}:
                 continue
             values = raw_value if isinstance(raw_value, list) else [raw_value]
-            normalized_values = [normalize_text(v) for v in values]
             if key == "country":
                 country_values = [resolve_country(v) for v in values]
                 zones = zones[zones["country"].isin(country_values)]
             else:
+                expanded_values = list(values)
+                if key == "city":
+                    for value in values:
+                        expanded_values.extend(
+                            self._resolve_city_aliases(value, country_filter_values)
+                        )
+                normalized_values = [normalize_text(v) for v in expanded_values]
                 column_norm = zones[key].fillna("").map(normalize_text)
                 exact = column_norm.isin(normalized_values)
                 if exact.any():
@@ -430,6 +484,25 @@ class QueryEngine:
         if zones.empty:
             raise QueryValidationError("No zones matched the selected filters.")
         return zones
+
+    def _country_filter_values(self, filters: dict[str, list[str] | str]) -> list[str] | None:
+        for raw_key, raw_value in filters.items():
+            key = normalize_text(raw_key).replace(" ", "_")
+            if key != "country":
+                continue
+            values = raw_value if isinstance(raw_value, list) else [raw_value]
+            return [resolve_country(value) for value in values]
+        return None
+
+    def _resolve_city_aliases(self, value: str, countries: list[str] | None = None) -> list[str]:
+        aliases = self.dataset.city_aliases
+        if aliases.empty:
+            return []
+        alias_key = normalize_alias_key(value)
+        matches = aliases[aliases["alias"] == alias_key]
+        if countries:
+            matches = matches[matches["country"].isin(countries)]
+        return sorted(str(city) for city in matches["city"].dropna().unique().tolist())
 
     def _filters_applied(
         self, zones: pd.DataFrame, filters: dict[str, list[str] | str]
@@ -456,11 +529,13 @@ class QueryEngine:
         }
         if aggregation not in agg_map:
             raise QueryValidationError(f"Aggregation {aggregation} is not valid for this query.")
-        grouped = (
-            frame.groupby(dimensions, dropna=False)
-            .agg(value=(value_column, agg_map[aggregation]), n_zones=("zone_id", "nunique"))
-            .reset_index()
-        )
+        aggregations: dict[str, tuple[str, str]] = {
+            "value": (value_column, agg_map[aggregation]),
+            "n_zones": ("zone_id", "nunique"),
+        }
+        if "is_outlier" in frame.columns:
+            aggregations["outlier_count"] = ("is_outlier", "sum")
+        grouped = frame.groupby(dimensions, dropna=False).agg(**aggregations).reset_index()
         return grouped
 
     def _current_zone_values(
@@ -507,23 +582,6 @@ class QueryEngine:
                 how="left",
             )
         return result
-
-    def _mark_outliers(
-        self, frame: pd.DataFrame, metric_key: str, value_column: str, policy: str
-    ) -> pd.DataFrame:
-        metadata = self._metric_metadata(metric_key)
-        if policy == "none" or metadata["outlier_policy"] == "none" or frame.empty:
-            return frame
-        values = frame[value_column].astype(float)
-        q1 = values.quantile(0.25)
-        q3 = values.quantile(0.75)
-        iqr = q3 - q1
-        upper = q3 + 3 * iqr
-        frame = frame.copy()
-        frame["is_outlier"] = values > upper
-        if metric_key == "lead_penetration":
-            frame["is_outlier"] = frame["is_outlier"] | (values > 1)
-        return frame
 
     def _build_metric_lookup(self) -> dict[str, str]:
         lookup: dict[str, str] = {}
@@ -607,11 +665,22 @@ class QueryEngine:
             caveats.append("L0W is the most recent available week, not a calendar date.")
         return caveats
 
-    def _caveats(self, metric_key: str, query: SemanticQuery, frame: pd.DataFrame) -> list[str]:
-        caveats = self._common_caveats(query)
-        if metric_key == "lead_penetration" and query.outlier_policy in {"flag", "exclude"}:
-            count = int(frame["is_outlier"].sum()) if "is_outlier" in frame.columns else 0
-            caveats.append(f"Lead Penetration outlier policy: {query.outlier_policy}; flagged rows: {count}.")
+    def _caveats(
+        self,
+        metric_key: str,
+        query: SemanticQuery,
+        frame: pd.DataFrame,
+        *,
+        include_common: bool = True,
+    ) -> list[str]:
+        caveats = self._common_caveats(query) if include_common else []
+        outlier_count = int(frame.attrs.get("outlier_count", 0))
+        if outlier_count and query.outlier_policy in {"flag", "exclude"}:
+            metric_name = self._metric_name(metric_key)
+            action = "excluded" if query.outlier_policy == "exclude" else "flagged"
+            caveats.append(
+                f"{metric_name} outlier policy: {action} {outlier_count} source rows."
+            )
         return caveats
 
     def _chart(

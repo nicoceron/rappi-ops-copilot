@@ -33,11 +33,12 @@ For the Docker Compose stack:
 
 - `rappi_ops_chat_agent.json`: public Chat Trigger plus DeepSeek agent tools.
 - `rappi_ops_automatic_insights.json`: Manual Trigger plus Schedule Trigger
-  that calls `POST http://ops-api:8000/insights/generate`.
+  that calls `POST http://ops-api:8000/insights/generate` and then downloads
+  `GET http://ops-api:8000/insights/latest.pdf` as a binary artifact.
 
 The automatic insights workflow is scheduled for Monday 07:00 in
 `America/Bogota`. It persists the latest report through the Ops API; the Next.js
-app displays `/insights/latest` and links to `/insights/latest.md`.
+app displays `/insights/latest` and links to `/insights/latest.pdf`.
 
 ## Notes
 

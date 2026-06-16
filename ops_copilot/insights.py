@@ -177,7 +177,7 @@ def generate_executive_insight_report(
         data_caveats=[
             "The dataset uses relative weeks. L0W is the latest available week, not a calendar date.",
             "Rate metrics are simple stored values. The workbook does not provide denominators for weighted averages.",
-            "Lead Penetration contains outliers above normal rate ranges; correlation logic excludes values above 1 for that metric.",
+            "Metric rows flagged as source outliers are excluded from executive insight scoring.",
             "Recommendations are operational hypotheses from observed metric patterns, not causal proof.",
         ],
     )
@@ -542,8 +542,10 @@ def render_report_html(report: InsightReport) -> str:
 
 def _fact_frame(dataset: OperationalDataset) -> pd.DataFrame:
     metric_facts = dataset.metric_facts[
-        ["zone_id", "metric_key", "week_offset", "week_label", "value"]
+        ["zone_id", "metric_key", "week_offset", "week_label", "value", "is_outlier"]
     ].copy()
+    metric_facts = metric_facts[~metric_facts["is_outlier"].fillna(False)].copy()
+    metric_facts = metric_facts.drop(columns=["is_outlier"])
     order_facts = dataset.order_facts[
         ["zone_id", "week_offset", "week_label", "orders"]
     ].copy()

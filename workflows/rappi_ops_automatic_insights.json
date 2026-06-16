@@ -51,6 +51,29 @@
       ],
       "id": "61396eef-ef21-4c15-ae66-1a4518950865",
       "name": "Generate executive insights"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://ops-api:8000/insights/latest.pdf",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        60,
+        30
+      ],
+      "id": "a19bd1d3-51c2-4a95-98ed-09e423d0b178",
+      "name": "Fetch executive PDF artifact"
     }
   ],
   "pinData": {},
@@ -71,6 +94,17 @@
         [
           {
             "node": "Generate executive insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate executive insights": {
+      "main": [
+        [
+          {
+            "node": "Fetch executive PDF artifact",
             "type": "main",
             "index": 0
           }

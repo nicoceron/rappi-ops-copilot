@@ -41,8 +41,12 @@ def print_summary(dataset: OperationalDataset) -> None:
     print(f"zones={len(dataset.zones)}")
     print(f"metrics={len(dataset.metrics)}")
     print(f"metric_synonyms={len(dataset.metric_synonyms)}")
+    print(f"city_aliases={len(dataset.city_aliases)}")
     print(f"metric_facts={len(dataset.metric_facts)}")
     print(f"order_facts={len(dataset.order_facts)}")
+    print(f"data_quality_status={dataset.data_quality['status']}")
+    for warning in dataset.data_quality.get("warnings", []):
+        print(f"warning={warning}")
 
 
 if __name__ == "__main__":

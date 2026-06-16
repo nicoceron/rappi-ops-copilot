@@ -17,6 +17,34 @@ from ops_copilot.settings import default_data_file
 
 def main() -> None:
     engine = QueryEngine(load_workbook(default_data_file()))
+    duplicate_metric_facts = engine.dataset.metric_facts.duplicated(
+        ["zone_id", "metric_key", "week_offset"]
+    ).sum()
+    if duplicate_metric_facts:
+        raise SystemExit(f"dataset: duplicate metric facts found: {duplicate_metric_facts}")
+    quality = engine.dataset.data_quality
+    if quality["metric_fact_duplicate_keys"] != 0:
+        raise SystemExit("dataset: expected no duplicate metric fact keys after normalization")
+    if quality["metric_duplicate_rows_removed"] < 1:
+        raise SystemExit("dataset: expected duplicate metric source rows to be detected")
+    if quality["outlier_cells_by_metric"].get("lead_penetration", 0) < 1:
+        raise SystemExit("dataset: expected lead penetration outliers to be flagged")
+    expected_city_aliases = {
+        ("MX", "cdmx"): "Ciudad De Mexico",
+        ("MX", "ciudad victoria"): "Cd. Victoria",
+        ("MX", "cd guzman"): "Ciudad Guzman",
+    }
+    city_alias_lookup = {
+        (row["country"], row["alias"]): row["city"]
+        for row in engine.dataset.city_aliases.to_dict(orient="records")
+    }
+    for key, expected_city in expected_city_aliases.items():
+        actual_city = city_alias_lookup.get(key)
+        if actual_city != expected_city:
+            raise SystemExit(
+                f"dataset: city alias {key} expected {expected_city}, got {actual_city}"
+            )
+
     cases = [
         (
             "top lead penetration",
@@ -26,6 +54,17 @@ def main() -> None:
                 dimensions=["country", "city", "zone"],
                 limit=5,
                 visualization="bar",
+            ),
+        ),
+        (
+            "lead outlier flag mode",
+            SemanticQuery(
+                intent="rank",
+                metrics=["Lead Penetration"],
+                dimensions=["country", "city", "zone"],
+                limit=1,
+                visualization="bar",
+                outlier_policy="flag",
             ),
         ),
         (
@@ -103,12 +142,54 @@ def main() -> None:
                 visualization="bar",
             ),
         ),
+        (
+            "cdmx alias trend",
+            SemanticQuery(
+                intent="trend",
+                metrics=["Perfect Orders"],
+                dimensions=["city", "zone_type"],
+                filters={"country": "MX", "city": ["CDMX", "Monterrey", "Guadalajara"]},
+                period={"start_offset": 7, "end_offset": 0},
+                aggregation="avg",
+                limit=60,
+                visualization="line",
+            ),
+        ),
+        (
+            "generated cd alias city filter",
+            SemanticQuery(
+                intent="trend",
+                metrics=["Perfect Orders"],
+                dimensions=["city"],
+                filters={"country": "MX", "city": "cd guzman"},
+                period={"start_offset": 7, "end_offset": 0},
+                aggregation="avg",
+                limit=8,
+                visualization="line",
+            ),
+        ),
     ]
 
     for name, query in cases:
         result = engine.execute(query)
         if result.row_count < 1:
             raise SystemExit(f"{name}: expected at least one row")
+        if name == "top lead penetration":
+            if any(float(row["value"]) > 1 for row in result.rows):
+                raise SystemExit("top lead penetration: default outlier policy should exclude values > 1")
+        if name == "lead outlier flag mode":
+            if not result.rows[0].get("is_outlier") or float(result.rows[0]["value"]) <= 1:
+                raise SystemExit("lead outlier flag mode: expected flagged outlier row")
+        if name == "cdmx alias trend":
+            cities = {row["city"] for row in result.rows}
+            if "Ciudad De Mexico" not in cities:
+                raise SystemExit("cdmx alias trend: expected Ciudad De Mexico rows")
+            if result.row_count != 48:
+                raise SystemExit(f"cdmx alias trend: expected 48 rows, got {result.row_count}")
+        if name == "generated cd alias city filter":
+            cities = {row["city"] for row in result.rows}
+            if cities != {"Ciudad Guzman"}:
+                raise SystemExit(f"generated cd alias city filter: unexpected cities {cities}")
         print(f"ok {name}: {result.row_count} rows ({result.answer_type})")
 
     report = generate_executive_insight_report(engine.dataset, source="smoke_test")

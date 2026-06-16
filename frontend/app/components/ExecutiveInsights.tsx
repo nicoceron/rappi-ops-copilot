@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
-  FileText,
+  Download,
   GitCompareArrows,
   Loader2,
   Network,
@@ -100,14 +100,9 @@ export function ExecutiveInsights() {
             {refreshing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
             Refresh
           </button>
-          <a href={`${apiBase}/insights/latest.md`} target="_blank" rel="noreferrer">
-            <FileText size={16} />
-            Markdown
-            <ArrowUpRight size={14} />
-          </a>
-          <a href={`${apiBase}/insights/latest.html`} target="_blank" rel="noreferrer">
-            <FileText size={16} />
-            HTML
+          <a href={`${apiBase}/insights/latest.pdf`} target="_blank" rel="noreferrer">
+            <Download size={16} />
+            PDF
             <ArrowUpRight size={14} />
           </a>
         </div>

@@ -64,7 +64,7 @@ class SemanticQuery(BaseModel):
     sort: list[SortField] = Field(default_factory=list)
     limit: int = Field(default=50, ge=1, le=500)
     visualization: ChartType = "table"
-    outlier_policy: OutlierPolicy = "flag"
+    outlier_policy: OutlierPolicy = "exclude"
     include_diagnostics: bool = False
     diagnostic_metrics: list[str] = Field(default_factory=list)
 

@@ -85,8 +85,10 @@ flowchart LR
   queryTool --> db["Postgres semantic tables"]
   exportTool --> files["CSV / PDF / chart artifact"]
   schedule["Schedule Trigger"] --> reportApi["POST /insights/generate"]
+  reportApi --> pdfArtifact["GET /insights/latest.pdf"]
   reportApi --> reportTable["executive_insight_report"]
   next["Next.js dashboard"] --> latestReport["GET /insights/latest"]
+  next --> latestPdf["GET /insights/latest.pdf"]
   latestReport --> reportTable
   ingest["Ingestion workflow"] --> db
   xlsx["Excel workbook"] --> ingest
@@ -222,14 +224,16 @@ Node design:
 
 1. Manual Trigger and Schedule Trigger.
 2. HTTP Request to `POST http://ops-api:8000/insights/generate`.
-3. Ops API runs deterministic rules for:
+3. HTTP Request to `GET http://ops-api:8000/insights/latest.pdf` with response format `File`, so every n8n execution contains the compiled executive PDF as binary data.
+4. Ops API runs deterministic rules for:
    - Anomalies: L0W vs L1W movements greater than 10%.
    - Worrying trends: 3+ consecutive weeks of directional deterioration.
    - Benchmarking: same-country and same-zone-type peer divergence.
    - Correlations: metric relationships such as Lead Penetration and conversion/quality proxies.
    - General opportunities: composite zone risk from weak metrics, deterioration, trends, and prioritization.
-4. Ops API persists the latest report in `executive_insight_report` and writes Markdown/JSON copies under `outputs/reports/`.
-5. Next.js reads `GET /insights/latest` and links to `GET /insights/latest.md`.
+5. Ops API persists the latest report in `executive_insight_report` and writes Markdown, HTML, JSON, LaTeX, and PDF copies under `outputs/reports/`.
+6. If LaTeX compilation fails and `DEEPSEEK_API_KEY` is configured, the Ops API sends the broken `.tex`, compiler log, and structured insight context to DeepSeek, retries with the repaired `.tex`, and stores the repair log. This happens inside the scheduled workflow run; no manual `.tex` edits are part of the system.
+7. Next.js reads `GET /insights/latest` and links to `GET /insights/latest.pdf`.
 
 ### 3. `rappi_ops_get_schema`
 

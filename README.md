@@ -11,16 +11,21 @@ The solution is designed for an operations user who wants to ask questions such 
 ## What This Project Delivers
 
 - A local Docker Compose stack with Postgres, FastAPI, n8n, and Next.js.
-- A normalized analytics layer built from the provided dummy operations workbook.
+- A normalized analytics layer built from the provided dummy operations workbook,
+  including city-alias lookup, source duplicate removal, and explicit outlier flags.
 - Read-only SQL execution guardrails for model-generated queries.
 - CSV and PDF exports for query results.
-- An automatic executive insights report with Markdown, HTML, JSON, API, and UI access.
+- An automatic executive insights report with Markdown, HTML, LaTeX, JSON, API, and UI access.
 - Importable n8n workflow JSON files for the chat agent and scheduled insights job.
 - Deterministic smoke tests that validate the core analytics behavior.
 
 ## How It Works
 
 1. The source workbook in `data/` is normalized by `ops_copilot.data_loader`.
+   City aliases are materialized separately, so user-facing labels such as `CDMX`
+   can resolve to workbook values such as `Ciudad De Mexico`.
+   Metric rows also carry `is_outlier` so unsafe rate values such as extreme
+   Lead Penetration can be excluded by default without deleting the raw source value.
 2. On API startup, the workbook is loaded into Postgres when `DATABASE_URL` is available.
 3. The FastAPI service exposes schema context, semantic query helpers, guarded SQL execution, exports, and executive insights endpoints.
 4. The n8n chat workflow uses DeepSeek `deepseek-v4-pro` to translate natural-language requests into read-only analytical queries and API calls.
@@ -51,6 +56,10 @@ The model can generate SQL, but the API only accepts a single `SELECT` or `WITH`
 - Docker and Docker Compose.
 - Python 3.11+ for local scripts.
 - A DeepSeek API key for live chat answers through n8n.
+- Optional for non-Docker API hosts: `tectonic`, `latexmk`, `xelatex`, or `pdflatex` to
+  compile the LaTeX executive report into PDF. The included API Docker image installs the
+  required TeX Live packages. If compilation fails and `DEEPSEEK_API_KEY` is available to
+  the API service, the report retries with an LLM-based LaTeX repair loop.
 
 The deterministic API, ingestion, and smoke tests can run without a DeepSeek key. The n8n agent needs `DEEPSEEK_API_KEY` to call the model.
 
@@ -67,6 +76,8 @@ Edit `.env` and set:
 ```bash
 POSTGRES_PASSWORD=
 DEEPSEEK_API_KEY=
+DEEPSEEK_MODEL=deepseek-chat
+LATEX_REPAIR_ATTEMPTS=2
 N8N_ENCRYPTION_KEY=
 ```
 
@@ -130,6 +141,7 @@ Activate both workflows. The automatic insights workflow calls:
 
 ```text
 POST http://ops-api:8000/insights/generate
+GET  http://ops-api:8000/insights/latest.pdf
 ```
 
 See `workflows/README.md` for the workflow-specific import notes.
@@ -158,7 +170,15 @@ curl -X POST http://localhost:8000/insights/generate \
 curl http://localhost:8000/insights/latest
 curl http://localhost:8000/insights/latest.md
 curl http://localhost:8000/insights/latest.html
+curl http://localhost:8000/insights/latest.tex
+curl -OJ http://localhost:8000/insights/latest.pdf
 ```
+
+The LaTeX source is always generated. The PDF endpoint compiles that source when a local
+TeX compiler is available. If the compiler fails, the API sends the compiler log, generated
+LaTeX, and structured report context to DeepSeek, asks for a corrected full `.tex` document,
+and retries up to `LATEX_REPAIR_ATTEMPTS`. The final repaired source is written back to
+`outputs/reports/latest-executive-insights.tex`, with repair notes beside it.
 
 Run a guarded model-facing SQL query:
 
@@ -194,6 +214,11 @@ Dry-run workbook normalization:
 ```bash
 python3 scripts/ingest_workbook.py --dry-run
 ```
+
+The dry run prints a data-quality status and warnings. Current known source-data
+warnings are exact duplicate metric rows removed before fact generation, order-only
+zones labeled `Unknown` for missing segment metadata, and flagged Lead Penetration
+outliers.
 
 Load the workbook into local Postgres:
 

@@ -11,6 +11,15 @@ create table if not exists dim_zone (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists dim_city_alias (
+  country text not null,
+  alias text not null,
+  city text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (country, alias)
+);
+
 create table if not exists semantic_metric (
   metric_key text primary key,
   metric_name text not null unique,
@@ -38,11 +47,15 @@ create table if not exists fact_metric_week (
   week_offset int not null check (week_offset between 0 and 8),
   week_label text not null,
   value numeric not null,
+  is_outlier boolean not null default false,
   source_column text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (zone_id, metric_key, week_offset)
 );
+
+alter table fact_metric_week
+  add column if not exists is_outlier boolean not null default false;
 
 create table if not exists fact_orders_week (
   zone_id text not null references dim_zone(zone_id) on delete cascade,
@@ -77,8 +90,14 @@ create table if not exists executive_insight_report (
 create index if not exists idx_dim_zone_country_city_zone
   on dim_zone (country, city, zone);
 
+create index if not exists idx_dim_city_alias_country_city
+  on dim_city_alias (country, city);
+
 create index if not exists idx_fact_metric_metric_week
   on fact_metric_week (metric_key, week_offset);
+
+create index if not exists idx_fact_metric_outlier
+  on fact_metric_week (metric_key, is_outlier);
 
 create index if not exists idx_fact_metric_zone
   on fact_metric_week (zone_id);

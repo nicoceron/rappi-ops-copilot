@@ -24,6 +24,14 @@ def ensure_postgres_loaded(database_url: str, data_file: Path, *, force: bool = 
         conn.commit()
 
     if existing_zones and not force:
+        dataset = load_workbook(data_file)
+        with psycopg.connect(database_url) as conn:
+            with conn.cursor() as cur:
+                _upsert_city_aliases(cur, dataset.city_aliases)
+                _upsert_metrics(cur, dataset.metrics)
+                _upsert_synonyms(cur, dataset.metric_synonyms)
+                _upsert_metric_facts(cur, dataset.metric_facts)
+            conn.commit()
         return
 
     ingest_postgres(load_workbook(data_file), database_url)
@@ -40,6 +48,7 @@ def ingest_postgres(dataset: OperationalDataset, database_url: str) -> None:
         with conn.cursor() as cur:
             cur.execute(schema_sql)
             _upsert_zones(cur, dataset.zones)
+            _upsert_city_aliases(cur, dataset.city_aliases)
             _upsert_metrics(cur, dataset.metrics)
             _upsert_synonyms(cur, dataset.metric_synonyms)
             _upsert_metric_facts(cur, dataset.metric_facts)
@@ -61,6 +70,22 @@ def _upsert_zones(cur: Any, frame: pd.DataFrame) -> None:
           updated_at = now()
         """,
         _records(frame),
+    )
+
+
+def _upsert_city_aliases(cur: Any, frame: pd.DataFrame) -> None:
+    cur.execute("delete from dim_city_alias")
+    if frame.empty:
+        return
+    cur.executemany(
+        """
+        insert into dim_city_alias (country, alias, city)
+        values (%(country)s, %(alias)s, %(city)s)
+        on conflict (country, alias) do update set
+          city = excluded.city,
+          updated_at = now()
+        """,
+        _records(frame[["country", "alias", "city"]]),
     )
 
 
@@ -102,15 +127,16 @@ def _upsert_metric_facts(cur: Any, frame: pd.DataFrame) -> None:
     cur.executemany(
         """
         insert into fact_metric_week (
-          zone_id, metric_key, week_offset, week_label, value, source_column
+          zone_id, metric_key, week_offset, week_label, value, is_outlier, source_column
         )
         values (
           %(zone_id)s, %(metric_key)s, %(week_offset)s, %(week_label)s,
-          %(value)s, %(source_column)s
+          %(value)s, %(is_outlier)s, %(source_column)s
         )
         on conflict (zone_id, metric_key, week_offset) do update set
           week_label = excluded.week_label,
           value = excluded.value,
+          is_outlier = excluded.is_outlier,
           source_column = excluded.source_column,
           updated_at = now()
         """,
@@ -122,6 +148,7 @@ def _upsert_metric_facts(cur: Any, frame: pd.DataFrame) -> None:
                     "week_offset",
                     "week_label",
                     "value",
+                    "is_outlier",
                     "source_column",
                 ]
             ]
