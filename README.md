@@ -180,6 +180,13 @@ curl -OJ http://localhost:8000/exports/<query_id>.csv
 curl -OJ http://localhost:8000/exports/<query_id>.pdf
 ```
 
+The SQL and semantic query responses also include an `exports` array with browser-safe
+download URLs. The n8n export tool uses the same metadata endpoint:
+
+```bash
+curl http://localhost:8000/exports/<query_id>/links?format=both
+```
+
 ## Data Ingestion
 
 Dry-run workbook normalization:

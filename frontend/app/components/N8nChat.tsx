@@ -70,6 +70,19 @@ type StructuredContent = {
 const SESSION_STORAGE_KEY = "rappi-ops-copilot-session-id";
 const HISTORY_STORAGE_KEY = "rappi-ops-copilot-chat-history";
 const MAX_STORED_MESSAGES = 30;
+const DEFAULT_OPS_API_URL = "http://localhost:8000";
+const OPS_API_BASE_URL = (process.env.NEXT_PUBLIC_OPS_API_URL || DEFAULT_OPS_API_URL).replace(
+  /\/$/,
+  "",
+);
+const PLACEHOLDER_EXPORT_HOSTS = new Set([
+  "tu-dominio.com",
+  "www.tu-dominio.com",
+  "example.com",
+  "www.example.com",
+  "your-domain.com",
+  "www.your-domain.com",
+]);
 const CHART_COLORS = ["#7ec4e3", "#7eea9b", "#f2b76c", "#fafafa"];
 const quickPrompts = [
   "¿Cuál es el promedio de Lead Penetration por país?",
@@ -815,14 +828,17 @@ function normalizeExports(value: unknown): ExportLink[] {
 
   return rawExports.flatMap((item) => {
     if (typeof item === "string") {
-      return [linkFromUrl(item)];
+      const link = linkFromUrl(item);
+      return link ? [link] : [];
     }
 
     if (!isRecord(item)) {
       return [];
     }
 
-    const href = firstString(item.href, item.url, item.downloadUrl);
+    const href = normalizeExportHref(
+      firstString(item.href, item.browser_url, item.downloadUrl, item.url, item.api_path),
+    );
     if (!href) {
       return [];
     }
@@ -839,8 +855,9 @@ function normalizeExports(value: unknown): ExportLink[] {
 }
 
 function extractExportLinks(text: string): ExportLink[] {
-  const matches = text.match(/https?:\/\/[^\s)]+?\.(?:csv|pdf)(?:\?[^\s)]*)?/gi) ?? [];
-  return matches.map(linkFromUrl);
+  const matches =
+    text.match(/(?:https?:\/\/|\/)[^\s)\]]+?\.(?:csv|pdf)(?:\?[^\s)\]]*)?/gi) ?? [];
+  return matches.map(linkFromUrl).filter((link): link is ExportLink => Boolean(link));
 }
 
 function dedupeExports(exports: ExportLink[]): ExportLink[] {
@@ -854,13 +871,58 @@ function dedupeExports(exports: ExportLink[]): ExportLink[] {
   });
 }
 
-function linkFromUrl(href: string): ExportLink {
+function linkFromUrl(rawHref: string): ExportLink | null {
+  const href = normalizeExportHref(rawHref);
+  if (!href) {
+    return null;
+  }
+
   const kind = inferExportKind(href);
   return {
     href,
     kind,
     label: labelForKind(kind),
   };
+}
+
+function normalizeExportHref(rawHref: string | undefined): string | null {
+  if (!rawHref) {
+    return null;
+  }
+
+  const href = rawHref.trim().replace(/^["'`(<]+|[>"'`),.]+$/g, "");
+  if (!href) {
+    return null;
+  }
+
+  if (href.startsWith("/")) {
+    return supportedExportPath(href) ? `${OPS_API_BASE_URL}${href}` : null;
+  }
+
+  try {
+    const url = new URL(href);
+    const hostname = url.hostname.toLowerCase();
+
+    if (PLACEHOLDER_EXPORT_HOSTS.has(hostname)) {
+      return null;
+    }
+
+    if (!supportedExportPath(url.pathname)) {
+      return null;
+    }
+
+    if (hostname === "ops-api") {
+      return `${OPS_API_BASE_URL}${url.pathname}${url.search}`;
+    }
+
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function supportedExportPath(pathname: string): boolean {
+  return /^\/exports\/[^/?#]+\.(?:csv|pdf)$/i.test(pathname);
 }
 
 function inferExportKind(href: string): ExportLink["kind"] {

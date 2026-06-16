@@ -27,3 +27,9 @@ def export_dir() -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+
+def public_api_base_url() -> str:
+    return os.getenv(
+        "PUBLIC_API_BASE_URL",
+        os.getenv("NEXT_PUBLIC_OPS_API_URL", "http://localhost:8000"),
+    ).rstrip("/")

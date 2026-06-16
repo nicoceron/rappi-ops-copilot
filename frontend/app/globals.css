@@ -170,9 +170,12 @@ img {
 }
 
 .workspace-command-bar {
+  --workspace-rail-width: min(100%, 220px);
+
   display: flex;
   min-height: 0;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
   gap: 18px;
   min-width: 0;
@@ -180,10 +183,13 @@ img {
   text-align: left;
 }
 
-.workspace-brand {
+.workspace-brand,
+.mono-hero-title,
+.workspace-tab-list,
+.workspace-n8n-link {
   display: block;
-  width: 100%;
-  max-width: 320px;
+  width: var(--workspace-rail-width);
+  max-width: var(--workspace-rail-width);
   min-width: 0;
 }
 
@@ -203,7 +209,7 @@ img {
 .mono-hero-title h2 {
   max-width: none;
   color: var(--foreground);
-  font-size: 2.24rem;
+  font-size: 2rem;
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1;
@@ -218,7 +224,7 @@ img {
 }
 
 .mono-hero-title p {
-  max-width: 260px;
+  max-width: 100%;
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.35;
@@ -226,8 +232,6 @@ img {
 
 .workspace-tab-list {
   display: flex;
-  width: 100%;
-  max-width: 220px;
   flex-direction: column;
   flex-wrap: wrap;
   gap: 8px;
@@ -259,8 +263,6 @@ img {
 .workspace-n8n-link {
   display: inline-flex;
   min-height: 42px;
-  width: 100%;
-  max-width: 220px;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -1688,10 +1690,6 @@ img {
     text-align: center;
   }
 
-  .workspace-brand {
-    max-width: 250px;
-  }
-
   .mono-hero-title {
     justify-items: center;
     gap: 10px;
@@ -1703,7 +1701,7 @@ img {
   }
 
   .mono-hero-title h2 {
-    font-size: 2.2rem;
+    font-size: 1.95rem;
   }
 
   .mono-hero-title p {
@@ -1711,22 +1709,13 @@ img {
   }
 
   .workspace-tab-list {
-    max-width: none;
-    flex-direction: row;
-    overflow-x: auto;
+    flex-direction: column;
     justify-content: center;
-    flex-wrap: nowrap;
-    width: 100%;
     padding-bottom: 2px;
   }
 
   .workspace-tab {
-    width: auto;
-    flex: 0 0 auto;
-  }
-
-  .workspace-n8n-link {
-    max-width: 180px;
+    width: 100%;
   }
 
   .chat-panel.tab-chat-panel,
@@ -1796,7 +1785,7 @@ img {
   }
 
   .mono-hero-title h2 {
-    font-size: 1.84rem;
+    font-size: 1.64rem;
     line-height: 1.04;
   }
 

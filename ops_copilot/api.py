@@ -4,7 +4,7 @@ import os
 import re
 import uuid
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -24,10 +24,10 @@ from ops_copilot.insights import (
     generate_executive_insight_report,
     render_report_html,
 )
-from ops_copilot.models import QueryResult, SemanticQuery
+from ops_copilot.models import ExportDownload, ExportFormat, QueryResult, SemanticQuery
 from ops_copilot.postgres_loader import ensure_postgres_loaded
 from ops_copilot.query_engine import QueryEngine, QueryValidationError
-from ops_copilot.settings import default_data_file, export_dir
+from ops_copilot.settings import default_data_file, export_dir, public_api_base_url
 
 app = FastAPI(
     title="Rappi Ops Copilot API",
@@ -76,6 +76,12 @@ class SqlQueryResult(BaseModel):
     visualization_hint: str
     caveats: list[str] = Field(default_factory=list)
     suggested_followups: list[str] = Field(default_factory=list)
+    exports: list[ExportDownload] = Field(default_factory=list)
+
+
+class ExportLinksResponse(BaseModel):
+    query_id: str
+    exports: list[ExportDownload]
 
 
 class GenerateInsightsRequest(BaseModel):
@@ -112,6 +118,7 @@ def query(request: SemanticQuery) -> QueryResult:
     except QueryValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    result.exports = _export_downloads(result.query_id)
     _RESULT_CACHE[result.query_id] = result
     return result
 
@@ -163,6 +170,7 @@ def run_sql(request: SqlQueryRequest) -> SqlQueryResult:
             "Ask to export this result to CSV or PDF.",
         ],
     )
+    result.exports = _export_downloads(result.query_id)
     _RESULT_CACHE[result.query_id] = result
     return result
 
@@ -229,6 +237,13 @@ def export_pdf(query_id: str) -> Response:
     )
 
 
+@app.get("/exports/{query_id}/links", response_model=ExportLinksResponse)
+def export_links(query_id: str, format: str = "both") -> ExportLinksResponse:
+    _cached_result(query_id)
+    formats = _parse_export_formats(format)
+    return ExportLinksResponse(query_id=query_id, exports=_export_downloads(query_id, formats))
+
+
 def _engine() -> QueryEngine:
     global _ENGINE
     if _ENGINE is None:
@@ -244,6 +259,51 @@ def _cached_result(query_id: str) -> QueryResult | SqlQueryResult:
             detail="Unknown query_id. Export is available only for results produced since API startup.",
         )
     return result
+
+
+def _parse_export_formats(value: str) -> list[ExportFormat]:
+    requested = [item.strip().lower() for item in value.split(",") if item.strip()]
+    if not requested or requested in (["all"], ["both"]):
+        return ["csv", "pdf"]
+
+    formats: list[ExportFormat] = []
+    for item in requested:
+        if item not in {"csv", "pdf"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Unsupported export format. Use csv, pdf, both, or a comma-separated list.",
+            )
+        formats.append(cast(ExportFormat, item))
+
+    return formats
+
+
+def _export_downloads(
+    query_id: str,
+    formats: list[ExportFormat] | None = None,
+) -> list[ExportDownload]:
+    selected = formats or ["csv", "pdf"]
+    content_types = {
+        "csv": "text/csv",
+        "pdf": "application/pdf",
+    }
+    labels = {
+        "csv": "CSV",
+        "pdf": "PDF",
+    }
+    base_url = public_api_base_url()
+
+    return [
+        ExportDownload(
+            format=format_name,
+            label=labels[format_name],
+            href=f"{base_url}/exports/{query_id}.{format_name}",
+            browser_url=f"{base_url}/exports/{query_id}.{format_name}",
+            api_path=f"/exports/{query_id}.{format_name}",
+            content_type=content_types[format_name],
+        )
+        for format_name in selected
+    ]
 
 
 def _generate_and_store_insights(source: str, persist: bool) -> InsightReport:

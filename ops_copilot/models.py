@@ -32,6 +32,7 @@ Aggregation = Literal[
 ]
 ChartType = Literal["none", "table", "bar", "line", "scatter"]
 OutlierPolicy = Literal["none", "flag", "exclude"]
+ExportFormat = Literal["csv", "pdf"]
 
 
 class Period(BaseModel):
@@ -125,6 +126,15 @@ class ChartSpec(BaseModel):
     chartjs: dict[str, Any] | None = None
 
 
+class ExportDownload(BaseModel):
+    format: ExportFormat
+    label: str
+    href: str
+    browser_url: str
+    api_path: str
+    content_type: str
+
+
 class QueryResult(BaseModel):
     query_id: str
     answer_type: str
@@ -134,4 +144,5 @@ class QueryResult(BaseModel):
     chart: ChartSpec
     caveats: list[str] = Field(default_factory=list)
     suggested_followups: list[str] = Field(default_factory=list)
+    exports: list[ExportDownload] = Field(default_factory=list)
     row_count: int
