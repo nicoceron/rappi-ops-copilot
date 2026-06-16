@@ -74,7 +74,7 @@ export function ExecutiveInsights() {
       const response = await fetch(`${apiBase}/insights/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "nextjs_manual_refresh", persist: true }),
+        body: JSON.stringify({ source: "manual_refresh", persist: true }),
       });
       if (!response.ok) {
         throw new Error(`API returned ${response.status}`);
@@ -119,12 +119,6 @@ export function ExecutiveInsights() {
         <div className="report-state report-error">{error}</div>
       ) : report ? (
         <div className="report-scroll">
-          <div className="report-meta">
-            <span>{formatGeneratedAt(report.generated_at)}</span>
-            <span>{report.source}</span>
-            <span>{report.period_label}</span>
-          </div>
-
           <InsightReportCharts report={report} />
 
           <div className="summary-strip">
@@ -148,7 +142,7 @@ export function ExecutiveInsights() {
                     <span>{category.findings.length}</span>
                   </div>
                   <div className="finding-list">
-                    {category.findings.slice(0, 3).map((finding) => (
+                    {category.findings.slice(0, 1).map((finding) => (
                       <article className="finding-row" key={finding.id}>
                         <div>
                           <span className={`severity-label severity-${finding.severity}`}>
@@ -171,15 +165,4 @@ export function ExecutiveInsights() {
       )}
     </section>
   );
-}
-
-function formatGeneratedAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }

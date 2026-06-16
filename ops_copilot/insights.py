@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import math
 import re
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from html import escape
@@ -57,7 +59,48 @@ OPPORTUNITY_METRICS = {
     "restaurants_sst_to_ss_cvr",
     "turbo_adoption",
 }
-HTML_FINDINGS_PER_CATEGORY = 2
+MARKDOWN_FINDINGS_PER_CATEGORY = 1
+HTML_FINDINGS_PER_CATEGORY = 1
+COUNTRY_POINTS = {
+    "AR": {"label": "Argentina", "lat": -38.4, "lng": -63.6},
+    "BR": {"label": "Brazil", "lat": -14.2, "lng": -51.9},
+    "CL": {"label": "Chile", "lat": -35.7, "lng": -71.5},
+    "CO": {"label": "Colombia", "lat": 4.6, "lng": -74.1},
+    "CR": {"label": "Costa Rica", "lat": 9.9, "lng": -84.1},
+    "EC": {"label": "Ecuador", "lat": -1.8, "lng": -78.2},
+    "MX": {"label": "Mexico", "lat": 23.6, "lng": -102.5},
+    "PE": {"label": "Peru", "lat": -9.2, "lng": -75.0},
+    "UY": {"label": "Uruguay", "lat": -32.5, "lng": -55.8},
+}
+CITY_POINTS = {
+    "AR|buenos aires": {"label": "Buenos Aires", "lat": -34.6037, "lng": -58.3816},
+    "BR|belo horizonte": {"label": "Belo Horizonte", "lat": -19.9167, "lng": -43.9345},
+    "BR|campinas": {"label": "Campinas", "lat": -22.9056, "lng": -47.0608},
+    "BR|cascavel": {"label": "Cascavel", "lat": -24.9555, "lng": -53.4552},
+    "BR|jundiai": {"label": "Jundiai", "lat": -23.1857, "lng": -46.8978},
+    "BR|mogi das cruzes": {"label": "Mogi das Cruzes", "lat": -23.5204, "lng": -46.1859},
+    "BR|natal": {"label": "Natal", "lat": -5.7793, "lng": -35.2009},
+    "BR|porto alegre": {"label": "Porto Alegre", "lat": -30.0346, "lng": -51.2177},
+    "BR|rio de janeiro": {"label": "Rio de Janeiro", "lat": -22.9068, "lng": -43.1729},
+    "CL|rancagua": {"label": "Rancagua", "lat": -34.1708, "lng": -70.7406},
+    "CO|duitama": {"label": "Duitama", "lat": 5.8269, "lng": -73.0203},
+    "CO|florencia": {"label": "Florencia", "lat": 1.6144, "lng": -75.6062},
+    "CR|alajuela": {"label": "Alajuela", "lat": 10.0163, "lng": -84.2116},
+    "CR|cartago": {"label": "Cartago", "lat": 9.8644, "lng": -83.9194},
+    "CR|san jose": {"label": "San Jose", "lat": 9.9281, "lng": -84.0907},
+    "EC|machala": {"label": "Machala", "lat": -3.2581, "lng": -79.9554},
+    "MX|ciudad guzman": {"label": "Ciudad Guzman", "lat": 19.7047, "lng": -103.4617},
+    "MX|cordoba": {"label": "Cordoba", "lat": 18.8847, "lng": -96.9256},
+    "MX|orizaba": {"label": "Orizaba", "lat": 18.8499, "lng": -97.1036},
+    "MX|san cristobal de las casas": {
+        "label": "San Cristobal de las Casas",
+        "lat": 16.737,
+        "lng": -92.6376,
+    },
+    "MX|tecate": {"label": "Tecate", "lat": 32.5668, "lng": -116.6251},
+    "PE|ica": {"label": "Ica", "lat": -14.0678, "lng": -75.7286},
+    "PE|mancora": {"label": "Mancora", "lat": -4.1078, "lng": -81.0475},
+}
 
 
 class InsightFinding(BaseModel):
@@ -146,11 +189,6 @@ def render_report_markdown(report: InsightReport) -> str:
     lines = [
         "# Rappi Ops Executive Insight Report",
         "",
-        f"- Report ID: `{report.report_id}`",
-        f"- Generated at: `{report.generated_at}`",
-        f"- Source: `{report.source}`",
-        f"- Period: {report.period_label}",
-        "",
         "## Executive summary",
         "",
     ]
@@ -159,50 +197,53 @@ def render_report_markdown(report: InsightReport) -> str:
             lines.extend(
                 [
                     f"{index}. **[{finding.severity.upper()}] {finding.title}**",
-                    f"   - Insight: {finding.summary}",
-                    f"   - Recommendation: {finding.recommendation}",
+                    f"   - {finding.summary}",
+                    f"   - Action: {finding.recommendation}",
                 ]
             )
     else:
         lines.append("No critical findings were detected with the current thresholds.")
 
+    lines.extend(
+        [
+            "",
+            "## Detail by insight category",
+            "",
+            (
+                "Showing the most material finding per required category. "
+                "The JSON endpoint keeps the full generated result."
+            ),
+        ]
+    )
+
     for category in report.categories:
-        lines.extend(["", f"## {category.title}", ""])
+        lines.extend(["", f"### {category.title}", ""])
         if not category.findings:
             lines.append("No findings detected for this category.")
             continue
-        for finding in category.findings:
+        for finding in category.findings[:MARKDOWN_FINDINGS_PER_CATEGORY]:
             lines.extend(
                 [
-                    f"### [{finding.severity.upper()}] {finding.title}",
-                    "",
-                    f"- Insight: {finding.summary}",
-                    f"- Recommendation: {finding.recommendation}",
+                    f"- **[{finding.severity.upper()}] {finding.title}**",
+                    f"  - Insight: {finding.summary}",
+                    f"  - Action: {finding.recommendation}",
                 ]
             )
             evidence = _evidence_text(finding.evidence)
             if evidence:
-                lines.append(f"- Evidence: {evidence}")
-            lines.append("")
+                lines.append(f"  - Evidence: {evidence}")
 
-    lines.extend(["## Data caveats", ""])
-    for caveat in report.data_caveats:
+    lines.extend(["", "## Data caveats", ""])
+    for caveat in report.data_caveats[:2]:
         lines.append(f"- {caveat}")
     lines.append("")
     return "\n".join(lines)
 
 
 def render_report_html(report: InsightReport) -> str:
-    all_findings = [finding for category in report.categories for finding in category.findings]
     displayed_findings = sum(
         min(len(category.findings), HTML_FINDINGS_PER_CATEGORY) for category in report.categories
     )
-    generated_at = _html(format_generated_at(report.generated_at))
-    category_chart = _category_count_chart(report)
-    severity_chart = _severity_mix_chart(all_findings)
-    anomaly_chart = _anomaly_chart(_findings_for(report, "anomalies"))
-    opportunity_chart = _opportunity_chart(_findings_for(report, "opportunities"))
-
     summary_items = "\n".join(
         _finding_summary_card(finding, index)
         for index, finding in enumerate(report.executive_summary[:5], start=1)
@@ -242,9 +283,9 @@ def render_report_html(report: InsightReport) -> str:
     }}
 
     main {{
-      width: min(1120px, calc(100% - 32px));
+      width: min(1060px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 34px 0 48px;
+      padding: 24px 0 40px;
     }}
 
     .report-hero {{
@@ -252,7 +293,7 @@ def render_report_html(report: InsightReport) -> str:
       border-radius: 14px;
       background: linear-gradient(135deg, #111318, #1f2933);
       color: #fff;
-      padding: 28px;
+      padding: 22px 24px;
       box-shadow: var(--shadow);
     }}
 
@@ -269,30 +310,13 @@ def render_report_html(report: InsightReport) -> str:
 
     h1 {{
       max-width: 740px;
-      font-size: clamp(30px, 5vw, 54px);
-      line-height: 0.98;
-      letter-spacing: -0.035em;
-    }}
-
-    .meta-row {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 22px;
-    }}
-
-    .meta-row span {{
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.08);
-      color: rgba(255, 255, 255, 0.82);
-      font-size: 12px;
-      font-weight: 700;
-      padding: 7px 11px;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1;
+      letter-spacing: -0.02em;
     }}
 
     .section {{
-      margin-top: 18px;
+      margin-top: 14px;
       border: 1px solid var(--line);
       border-radius: 14px;
       background: var(--panel);
@@ -330,39 +354,6 @@ def render_report_html(report: InsightReport) -> str:
       padding: 12px 18px;
     }}
 
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      padding: 16px;
-    }}
-
-    .chart-card, .finding-card {{
-      min-width: 0;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: var(--panel);
-      padding: 14px;
-    }}
-
-    .chart-card h3, .finding-card h3 {{
-      margin-bottom: 4px;
-      font-size: 14px;
-      line-height: 1.25;
-    }}
-
-    .chart-card p, .finding-card p, .finding-card li {{
-      color: var(--muted);
-      font-size: 12px;
-    }}
-
-    .chart-card svg {{
-      display: block;
-      width: 100%;
-      height: auto;
-      margin-top: 10px;
-    }}
-
     .summary-grid {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
@@ -372,7 +363,23 @@ def render_report_html(report: InsightReport) -> str:
 
     .finding-card {{
       position: relative;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 14px;
       padding-left: 16px;
+    }}
+
+    .finding-card h3 {{
+      margin-bottom: 4px;
+      font-size: 14px;
+      line-height: 1.25;
+    }}
+
+    .finding-card p {{
+      color: var(--muted);
+      font-size: 12px;
     }}
 
     .finding-card::before {{
@@ -476,9 +483,6 @@ def render_report_html(report: InsightReport) -> str:
         padding: 18px 0 28px;
       }}
 
-      .grid {{
-        grid-template-columns: 1fr;
-      }}
     }}
 
     @media print {{
@@ -506,26 +510,7 @@ def render_report_html(report: InsightReport) -> str:
     <header class="report-hero">
       <p class="eyebrow">Automatic insights</p>
       <h1>Rappi Ops Executive Insight Report</h1>
-      <div class="meta-row">
-        <span>Report ID: {_html(report.report_id)}</span>
-        <span>Generated: {generated_at}</span>
-        <span>Source: {_html(report.source)}</span>
-        <span>{_html(report.period_label)}</span>
-      </div>
     </header>
-
-    <section class="section">
-      <div class="section-header">
-        <h2>Executive dashboard</h2>
-        <span>{len(all_findings)} findings scanned</span>
-      </div>
-      <div class="grid">
-        {category_chart}
-        {severity_chart}
-        {opportunity_chart}
-        {anomaly_chart}
-      </div>
-    </section>
 
     <section class="section">
       <div class="section-header">
@@ -544,7 +529,7 @@ def render_report_html(report: InsightReport) -> str:
         <h2>Data caveats</h2>
         <span>{displayed_findings} findings shown</span>
       </div>
-      <p class="brief-note">This executive version shows the top {HTML_FINDINGS_PER_CATEGORY} findings per category. The API JSON keeps the complete generated result for audit and follow-up analysis.</p>
+      <p class="brief-note">This executive version shows the most material finding per required category. The API JSON keeps the complete generated result for audit and follow-up analysis.</p>
       <ul class="caveats">
         {caveats}
       </ul>
@@ -1278,14 +1263,6 @@ def _evidence_text(evidence: dict[str, Any]) -> str:
     return "; ".join(chunks)
 
 
-def format_generated_at(value: str) -> str:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return value
-    return parsed.strftime("%b %-d, %Y %H:%M UTC")
-
-
 def _findings_for(report: InsightReport, key: InsightCategoryKey) -> list[InsightFinding]:
     for category in report.categories:
         if category.key == key:
@@ -1342,6 +1319,50 @@ def _severity_mix_chart(findings: list[InsightFinding]) -> str:
     )
 
 
+def _geo_risk_map_chart(findings: list[InsightFinding]) -> str:
+    locations: dict[str, dict[str, Any]] = {}
+    for finding in findings:
+        code = str(finding.evidence.get("country") or "")
+        if code not in COUNTRY_POINTS:
+            continue
+        city = str(finding.evidence.get("city") or "")
+        city_point = CITY_POINTS.get(_location_key(code, city)) if city else None
+        point = city_point or COUNTRY_POINTS[code]
+        location_id = f"{code}:{_normalize_location_name(city)}" if city_point else code
+        label = f"{point['label']}, {code}" if city_point else str(point["label"])
+        current = locations.setdefault(
+            location_id,
+            {
+                "code": code,
+                "count": 0,
+                "critical": 0,
+                "high": 0,
+                "id": location_id,
+                "label": label,
+                "lat": point["lat"],
+                "lng": point["lng"],
+                "risk": 0,
+                "top_finding": finding.title,
+            },
+        )
+        severity_score = SEVERITY_RANK[finding.severity]
+        current["count"] += 1
+        current["critical"] += 1 if finding.severity == "critical" else 0
+        current["high"] += 1 if finding.severity == "high" else 0
+        current["risk"] += severity_score
+        if severity_score > current.get("top_score", 0):
+            current["top_score"] = severity_score
+            current["top_finding"] = finding.title
+
+    rows = sorted(locations.values(), key=lambda row: row["risk"], reverse=True)
+    return _chart_card(
+        "Operational risk map",
+        "Real map tiles with city-level risk markers where coordinates are available.",
+        _geo_map_embed(rows),
+        class_name="chart-card-wide",
+    )
+
+
 def _anomaly_chart(findings: list[InsightFinding]) -> str:
     rows = []
     for finding in findings[:6]:
@@ -1362,6 +1383,43 @@ def _anomaly_chart(findings: list[InsightFinding]) -> str:
         "Week-over-week anomalies",
         "Signed impact after metric direction is applied.",
         _horizontal_bars_svg(rows, signed=True),
+    )
+
+
+def _trend_path_chart(findings: list[InsightFinding]) -> str:
+    series = []
+    for finding in findings[:3]:
+        values = finding.evidence.get("values")
+        if not isinstance(values, dict):
+            continue
+        start = _safe_float(values.get("L3W"))
+        if start is None or abs(start) < 1e-9:
+            continue
+        direction = str(finding.evidence.get("direction") or "")
+        points = []
+        for week in ["L3W", "L2W", "L1W", "L0W"]:
+            raw = _safe_float(values.get(week))
+            if raw is None:
+                continue
+            deterioration = (
+                (raw - start) / abs(start)
+                if direction == "lower_better"
+                else (start - raw) / abs(start)
+            )
+            health = (1 - max(0.0, deterioration)) * 100
+            points.append((week, _clamp(health, 0, 125)))
+        if len(points) == 4:
+            series.append(
+                {
+                    "label": _zone_metric_label(finding),
+                    "points": points,
+                }
+            )
+    return _chart_card(
+        "Worrying trend paths",
+        "Normalized health index for 3+ consecutive weeks of deterioration.",
+        _line_series_svg(series),
+        class_name="chart-card-wide",
     )
 
 
@@ -1386,6 +1444,27 @@ def _trend_chart(findings: list[InsightFinding]) -> str:
     )
 
 
+def _benchmark_index_chart(findings: list[InsightFinding]) -> str:
+    rows = []
+    for finding in findings[:5]:
+        underperformance = _number_from_evidence(finding, "underperformance_score")
+        if underperformance is None:
+            continue
+        zone = (1 - max(0.0, underperformance)) * 100
+        rows.append(
+            {
+                "label": _zone_metric_label(finding),
+                "peer": 100,
+                "zone": _clamp(zone, 0, 130),
+            }
+        )
+    return _chart_card(
+        "Benchmark gap index",
+        "Zone performance versus same-country/type peer median indexed to 100.",
+        _paired_index_svg(rows),
+    )
+
+
 def _benchmark_chart(findings: list[InsightFinding]) -> str:
     rows = []
     for finding in findings[:6]:
@@ -1407,6 +1486,30 @@ def _benchmark_chart(findings: list[InsightFinding]) -> str:
     )
 
 
+def _correlation_scatter_chart(findings: list[InsightFinding]) -> str:
+    rows = []
+    for finding in findings[:6]:
+        corr = _number_from_evidence(finding, "pearson_correlation")
+        low_low = _number_from_evidence(finding, "low_low_count")
+        if corr is None or low_low is None:
+            continue
+        rows.append(
+            {
+                "label": _compact_label(
+                    f"{finding.evidence.get('metric_x')} / {finding.evidence.get('metric_y')}",
+                    40,
+                ),
+                "corr": corr,
+                "low_low": low_low,
+            }
+        )
+    return _chart_card(
+        "Correlation quadrant",
+        "Relationship strength versus zones low on both metrics.",
+        _scatter_svg(rows),
+    )
+
+
 def _correlation_chart(findings: list[InsightFinding]) -> str:
     rows = []
     for finding in findings[:6]:
@@ -1425,6 +1528,38 @@ def _correlation_chart(findings: list[InsightFinding]) -> str:
         "Metric correlations",
         "Pearson relationships across zones in the latest week.",
         _horizontal_bars_svg(rows, signed=True),
+    )
+
+
+def _opportunity_driver_chart(findings: list[InsightFinding]) -> str:
+    if not findings:
+        return _chart_card(
+            "Opportunity drivers",
+            "Top zone's weakest metrics. Higher risk is worse.",
+            "",
+        )
+    weak_metrics = findings[0].evidence.get("weak_metrics")
+    rows = []
+    if isinstance(weak_metrics, list):
+        for item in weak_metrics[:5]:
+            if not isinstance(item, dict):
+                continue
+            risk = _safe_float(item.get("risk"))
+            metric = item.get("metric")
+            if risk is None or metric is None:
+                continue
+            rows.append(
+                {
+                    "label": _compact_label(str(metric), 28),
+                    "value": _clamp(risk, 0, 1),
+                    "value_label": f"{_clamp(risk, 0, 1):.0%}",
+                    "color": "#16834f",
+                }
+            )
+    return _chart_card(
+        "Opportunity drivers",
+        f"Weakest metrics for {_zone_metric_label(findings[0], include_metric=False)}. Higher risk is worse.",
+        _horizontal_bars_svg(rows),
     )
 
 
@@ -1569,9 +1704,10 @@ def _evidence_badges(finding: InsightFinding) -> list[str]:
     return badges[:5]
 
 
-def _chart_card(title: str, description: str, svg: str) -> str:
+def _chart_card(title: str, description: str, svg: str, *, class_name: str = "") -> str:
     chart = svg or '<p class="empty-state">Not enough structured evidence for this chart.</p>'
-    return f"""<article class="chart-card">
+    classes = " ".join(part for part in ["chart-card", class_name] if part)
+    return f"""<article class="{_html(classes)}">
   <h3>{_html(title)}</h3>
   <p>{_html(description)}</p>
   {chart}
@@ -1640,6 +1776,268 @@ def _horizontal_bars_svg(rows: list[dict[str, Any]], *, signed: bool = False) ->
     return "\n".join(parts)
 
 
+def _geo_map_embed(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    max_risk = max(float(row["risk"]) for row in rows) or 1
+    markers = [
+        {
+            "critical": int(row["critical"]),
+            "count": int(row["count"]),
+            "high": int(row["high"]),
+            "label": str(row["label"]),
+            "lat": float(row["lat"]),
+            "lng": float(row["lng"]),
+            "risk": float(row["risk"]),
+            "topFinding": str(row["top_finding"]),
+        }
+        for row in rows
+    ]
+    data_json = json.dumps(markers, ensure_ascii=False).replace("</", "<\\/")
+    for marker in markers:
+        risk = float(marker["risk"])
+        marker["radius"] = 7 + min(13, risk / max_risk * 13)
+    stats = []
+    for row in rows[:4]:
+        high_risk = int(row["critical"]) + int(row["high"])
+        stats.append(
+            f"""<article>
+  <strong>{_html(str(row["label"]))}</strong>
+  <span>{int(row["count"])} findings, {high_risk} high risk</span>
+  <p>{_html(_compact_label(str(row["top_finding"]), 48))}</p>
+</article>"""
+        )
+    return f"""<div class="geo-map-embed">
+  <div class="geo-map-frame">
+    <div id="geo-risk-map" class="geo-map-canvas" aria-label="Operational risk map"></div>
+  </div>
+  <div class="geo-stat-list">
+    {"".join(stats)}
+  </div>
+  <script type="application/json" id="geo-risk-map-data">{data_json}</script>
+</div>"""
+
+
+def _leaflet_report_script() -> str:
+    return """<script>
+(function () {
+  function initGeoRiskMap() {
+    var mapElement = document.getElementById("geo-risk-map");
+    var dataElement = document.getElementById("geo-risk-map-data");
+    if (!mapElement || !dataElement || !window.L) {
+      return;
+    }
+
+    var points = [];
+    try {
+      points = JSON.parse(dataElement.textContent || "[]");
+    } catch (_error) {
+      points = [];
+    }
+    if (!points.length) {
+      return;
+    }
+
+    var map = L.map(mapElement, {
+      attributionControl: false,
+      dragging: true,
+      maxBounds: [[-60, -125], [36, -32]],
+      maxZoom: 6,
+      minZoom: 2,
+      scrollWheelZoom: false,
+      zoomControl: true
+    }).setView([-14, -68], 3);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 6,
+      minZoom: 2
+    }).addTo(map);
+    L.control.attribution({ prefix: false }).addAttribution("© OpenStreetMap").addTo(map);
+
+    var group = L.featureGroup().addTo(map);
+    points.forEach(function (point) {
+      var highRisk = Number(point.critical || 0) + Number(point.high || 0);
+      var size = Math.max(18, Math.round(Number(point.radius || 10) * 2));
+      var marker = L.marker([point.lat, point.lng], {
+        icon: L.divIcon({
+          className: "geo-risk-div-marker" + (Number(point.critical || 0) > 0 ? "" : " geo-risk-warning"),
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2]
+        })
+      }).addTo(group);
+      marker.bindTooltip(
+        point.label + ": " + point.count + " findings, " + highRisk + " high risk",
+        { direction: "top", opacity: 0.96 }
+      );
+    });
+
+    if (points.length > 1) {
+      map.fitBounds(group.getBounds(), { maxZoom: 4, padding: [44, 44] });
+    } else {
+      map.setView([points[0].lat, points[0].lng], 4);
+    }
+    window.setTimeout(function () { map.invalidateSize(); }, 0);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initGeoRiskMap);
+  } else {
+    initGeoRiskMap();
+  }
+})();
+</script>"""
+
+
+def _location_key(country: str, city: str) -> str:
+    return f"{country}|{_normalize_location_name(city)}"
+
+
+def _normalize_location_name(value: str) -> str:
+    text = unicodedata.normalize("NFD", str(value))
+    text = "".join(char for char in text if unicodedata.category(char) != "Mn")
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _line_series_svg(series: list[dict[str, Any]]) -> str:
+    if not series:
+        return ""
+    width = 720
+    height = 270
+    plot_x = 70
+    plot_y = 28
+    plot_width = 560
+    plot_height = 160
+    colors = ["#bd6b12", "#c73a31", "#1677a8"]
+    weeks = ["L3W", "L2W", "L1W", "L0W"]
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Trend paths">',
+        f'<rect x="0" y="0" width="{width}" height="{height}" rx="12" fill="#f8fafc" />',
+    ]
+    for value in [100, 80, 60]:
+        y = plot_y + (120 - value) / 70 * plot_height
+        parts.append(
+            f'<line x1="{plot_x}" y1="{y:.1f}" x2="{plot_x + plot_width}" y2="{y:.1f}" '
+            'stroke="#e1e7ee" stroke-width="1" />'
+        )
+        parts.append(
+            f'<text x="{plot_x - 10}" y="{y + 4:.1f}" text-anchor="end" '
+            'fill="#6b7280" font-size="11">{value}</text>'
+        )
+    for index, week in enumerate(weeks):
+        x = plot_x + index * (plot_width / (len(weeks) - 1))
+        parts.append(
+            f'<text x="{x:.1f}" y="{plot_y + plot_height + 24}" text-anchor="middle" '
+            f'fill="#6b7280" font-size="12">{week}</text>'
+        )
+    for index, item in enumerate(series):
+        color = colors[index % len(colors)]
+        point_attrs = []
+        for week, value in item["points"]:
+            x = plot_x + weeks.index(week) * (plot_width / (len(weeks) - 1))
+            y = plot_y + (120 - float(value)) / 70 * plot_height
+            point_attrs.append(f"{x:.1f},{y:.1f}")
+        parts.append(
+            f'<polyline points="{" ".join(point_attrs)}" fill="none" stroke="{color}" '
+            'stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />'
+        )
+        last_x, last_y = point_attrs[-1].split(",")
+        parts.append(
+            f'<circle cx="{last_x}" cy="{last_y}" r="4" fill="{color}" />'
+        )
+        parts.append(
+            f'<text x="{plot_x}" y="{218 + index * 17}" fill="{color}" font-size="12" '
+            f'font-weight="700">{_html(_compact_label(str(item["label"]), 62))}</text>'
+        )
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def _paired_index_svg(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    width = 720
+    row_height = 50
+    plot_x = 232
+    plot_width = 350
+    value_x = 650
+    height = 32 + row_height * len(rows) + 14
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Benchmark index">',
+        f'<rect x="0" y="0" width="{width}" height="{height}" rx="12" fill="#f8fafc" />',
+        f'<line x1="{plot_x + plot_width * 100 / 130:.1f}" y1="16" '
+        f'x2="{plot_x + plot_width * 100 / 130:.1f}" y2="{height - 12}" '
+        'stroke="#cfd7df" stroke-width="1" />',
+    ]
+    for index, row in enumerate(rows):
+        y = 26 + index * row_height
+        zone = _safe_float(row["zone"]) or 0
+        label = _compact_label(str(row["label"]), 32)
+        zone_width = max(4, zone / 130 * plot_width)
+        peer_width = 100 / 130 * plot_width
+        parts.append(
+            f'<text x="16" y="{y + 16}" fill="#27313d" font-size="12" '
+            f'font-weight="700">{_html(label)}</text>'
+        )
+        parts.append(
+            f'<rect x="{plot_x}" y="{y + 4}" width="{peer_width:.1f}" height="11" '
+            'rx="4" fill="#d4dce5" />'
+        )
+        parts.append(
+            f'<rect x="{plot_x}" y="{y + 20}" width="{zone_width:.1f}" height="14" '
+            'rx="5" fill="#1677a8" />'
+        )
+        parts.append(
+            f'<text x="{value_x}" y="{y + 31}" fill="#5f6673" font-size="12" '
+            f'font-weight="800" text-anchor="end">{zone:.0f} index</text>'
+        )
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def _scatter_svg(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    width = 720
+    height = 270
+    plot_x = 70
+    plot_y = 30
+    plot_width = 540
+    plot_height = 170
+    max_low_low = max(float(row["low_low"]) for row in rows) or 1
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Correlation quadrant">',
+        f'<rect x="0" y="0" width="{width}" height="{height}" rx="12" fill="#f8fafc" />',
+        f'<line x1="{plot_x}" y1="{plot_y + plot_height}" x2="{plot_x + plot_width}" '
+        f'y2="{plot_y + plot_height}" stroke="#cfd7df" />',
+        f'<line x1="{plot_x + plot_width / 2:.1f}" y1="{plot_y}" '
+        f'x2="{plot_x + plot_width / 2:.1f}" y2="{plot_y + plot_height}" stroke="#cfd7df" />',
+    ]
+    for row in rows:
+        corr = float(row["corr"])
+        low_low = float(row["low_low"])
+        x = plot_x + (corr + 1) / 2 * plot_width
+        y = plot_y + (1 - low_low / max_low_low) * plot_height
+        color = "#635bff" if corr >= 0 else "#bd6b12"
+        radius = 8 + low_low / max_low_low * 12
+        parts.append(
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}" '
+            'fill-opacity="0.72" />'
+        )
+        parts.append(
+            f'<text x="{x + radius + 4:.1f}" y="{y + 4:.1f}" fill="#27313d" '
+            f'font-size="11">{_html(str(row["label"]))}</text>'
+        )
+    parts.append(
+        f'<text x="{plot_x}" y="{height - 22}" fill="#6b7280" font-size="12">-1.0 correlation</text>'
+    )
+    parts.append(
+        f'<text x="{plot_x + plot_width}" y="{height - 22}" fill="#6b7280" font-size="12" '
+        'text-anchor="end">+1.0 correlation</text>'
+    )
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
 def _number_from_evidence(finding: InsightFinding, key: str) -> float | None:
     return _safe_float(finding.evidence.get(key))
 
@@ -1663,3 +2061,7 @@ def _compact_label(value: str, limit: int = 48) -> str:
 
 def _html(value: Any) -> str:
     return escape(str(value), quote=True)
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))

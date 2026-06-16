@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc" viewBox="0 0 1200 420">
+  <title id="title">Rappi Ops Copilot</title>
+  <desc id="desc">Dark branded README hero for Rappi Ops Copilot.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#050505" />
+      <stop offset="0.58" stop-color="#090909" />
+      <stop offset="1" stop-color="#111111" />
+    </linearGradient>
+    <linearGradient id="beam" x1="0" x2="1" y1="1" y2="0">
+      <stop offset="0" stop-color="#7ec4e3" stop-opacity="0" />
+      <stop offset="0.45" stop-color="#7ec4e3" stop-opacity="0.34" />
+      <stop offset="1" stop-color="#7eea9b" stop-opacity="0.16" />
+    </linearGradient>
+    <g id="mark">
+      <g transform="translate(0 1254) scale(.1 -.1)" fill="#fafafa">
+        <path d="M5952 10833c-5-10-12-61-16-113-56-800-293-1550-666-2105-352-524-838-919-1460-1187-445-192-908-298-1492-342-102-8-191-17-197-20-16-10-13-81 3-95 21-18 2992-10 3096 8 423 72 691 344 754 763 23 150 31 512 51 2298 3 261 8 545 11 631 6 168 6 167-46 175-21 4-31 0-38-13zM6563 10842l-33-3v-277c0-571 30-2562 40-2682 26-303 95-474 260-641 97-99 183-153 314-198 196-69 117-66 1791-66h1510v50 50l-45 7c-25 3-119 11-210 18-919 61-1753 382-2362 909-540 465-932 1184-1109 2030-38 182-74 440-90 636-7 83-17 155-23 160-6 6-26 9-43 7zM2114 6346c-3-7-4-31-2-52l3-39 80-8c276-26 406-42 530-63 681-119 1234-361 1740-762 144-114 440-408 554-550 353-440 613-994 735-1567 56-258 99-573 111-810 9-160 7-155 60-155h46l-6 1383c-6 1350-12 1619-40 1782-37 209-141 418-272 550-157 157-316 238-553 282-87 16-211 18-1538 20-1241 3-1443 2-1448-11z" />
+      </g>
+      <g transform="translate(0 1254) scale(.1 -.1)" fill="#fafafa">
+        <path d="M6220 6891c-91-19-175-86-212-169-33-73-31-172 5-244 139-284 557-178 550 138-4 168-180 309-343 275zM7741 6119c-256-16-436-71-608-185-249-165-420-435-487-769-32-159-36-322-36-1572V2340h45c42 0 44 2 50 33 96 558 224 967 436 1397 214 434 435 746 772 1089 328 333 642 563 1037 762 419 210 827 327 1344 384 76 9 143 18 147 21 16 10 10 91-7 98-23 9-2548 4-2693-5z" />
+      </g>
+    </g>
+  </defs>
+  <rect width="1200" height="420" rx="28" fill="url(#bg)" />
+  <path d="M780-90 1235 0 920 510 560 470Z" fill="url(#beam)" opacity="0.9" />
+  <path d="M900-80 1215 70 1020 470 745 430Z" fill="#7ec4e3" opacity="0.12" />
+  <path d="M1030-40 1230 25 1090 420 910 410Z" fill="#7eea9b" opacity="0.12" />
+  <use href="#mark" transform="translate(186 98) scale(.18) translate(-120 -85)" />
+  <text x="500" y="185" fill="#fafafa" font-family="Inter, Geist, Arial, sans-serif" font-size="78" font-weight="800">Rappi</text>
+  <text x="500" y="274" fill="#fafafa" font-family="Inter, Geist, Arial, sans-serif" font-size="68" font-weight="800">Ops Copilot</text>
+  <text x="504" y="326" fill="#fafafa" opacity="0.68" font-family="Inter, Geist, Arial, sans-serif" font-size="22" font-weight="600">Ask operations data. Find weak zones. Act faster.</text>
+</svg>

@@ -21,13 +21,13 @@ If importing the chat agent manually, create them in n8n after import:
 - `DeepSeek account`: DeepSeek API credential with your API key.
 - `Rappi Ops Postgres`: Postgres credential pointing to the `postgres` service.
 
-For the Docker Compose defaults:
+For the Docker Compose stack:
 
 - Host: `postgres`
 - Port: `5432`
 - Database: `rappi_ops`
 - User: `rappi`
-- Password: `rappi`
+- Password: use the `POSTGRES_PASSWORD` value from `.env`
 
 ## Workflows
 

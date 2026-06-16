@@ -39,9 +39,13 @@ export function WorkspaceTabs({ webhookUrl }: WorkspaceTabsProps) {
 
       <div className="mono-hero-content">
         <div className="workspace-command-bar">
+          <div className="workspace-brand" aria-label="Rappi Ops Copilot">
+            <img src="/brand/rappi-ops-lockup.svg" alt="Rappi Ops Copilot" />
+          </div>
+
           <div className="mono-hero-title">
             <h2>
-              Ask <span>Rappi Ops Copilot</span>
+              Ask <span>operations data</span>
             </h2>
             <p>
               Weak zones, KPI rankings, trend diagnostics, charts, CSV exports, and PDF summaries.

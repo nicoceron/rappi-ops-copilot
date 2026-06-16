@@ -2,7 +2,6 @@
 
 import {
   BarChart3,
-  Bot,
   Download,
   FileText,
   LoaderCircle,
@@ -233,8 +232,7 @@ export function N8nChat({ webhookUrl }: N8nChatProps) {
   return (
     <div className="analytics-chat">
       <div className="analytics-chat-toolbar">
-        <div>
-          <strong>Rappi Ops Copilot</strong>
+        <div className="analytics-chat-brand">
           <span>{sessionId ? `Session ${sessionId.slice(-8)}` : "Preparing session"}</span>
         </div>
         <button type="button" onClick={startNewConversation} title="Start new conversation">
@@ -249,8 +247,8 @@ export function N8nChat({ webhookUrl }: N8nChatProps) {
 
         {isSending ? (
           <div className="message-row message-row-bot">
-            <span className="message-avatar">
-              <Bot size={16} />
+            <span className="message-avatar message-avatar-bot">
+              <img src="/brand/rappi-ops-mark.svg" alt="" />
             </span>
             <div className="message-bubble message-bubble-bot message-bubble-loading">
               <LoaderCircle className="spin" size={16} />
@@ -303,7 +301,9 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 
   return (
     <div className={`message-row ${isBot ? "message-row-bot" : "message-row-user"}`}>
-      <span className="message-avatar">{isBot ? <Bot size={16} /> : <User size={16} />}</span>
+      <span className={isBot ? "message-avatar message-avatar-bot" : "message-avatar"}>
+        {isBot ? <img src="/brand/rappi-ops-mark.svg" alt="" /> : <User size={16} />}
+      </span>
       <article
         className={`message-bubble ${isBot ? "message-bubble-bot" : "message-bubble-user"} ${
           message.status === "error" ? "message-bubble-error" : ""
@@ -580,7 +580,8 @@ function normalizeStructuredCandidate(candidate: Record<string, unknown>): Struc
 }
 
 function buildMessagePresentation(message: ChatMessage) {
-  const markdownTables = parseMarkdownTables(message.text);
+  const textSource = message.structured?.answer || message.text;
+  const markdownTables = parseMarkdownTables(textSource);
   const structuredTables = message.structured?.tables ?? [];
   const tables = [...structuredTables, ...markdownTables.tables];
   const structuredCharts = message.structured?.charts ?? [];
@@ -589,7 +590,7 @@ function buildMessagePresentation(message: ChatMessage) {
     ...(message.structured?.exports ?? []),
     ...extractExportLinks(message.text),
   ];
-  const text = message.structured?.answer || markdownTables.textWithoutTables || message.text;
+  const text = markdownTables.textWithoutTables || textSource;
 
   return {
     text,
@@ -600,7 +601,7 @@ function buildMessagePresentation(message: ChatMessage) {
 }
 
 function parseMarkdownTables(text: string): { tables: ParsedTable[]; textWithoutTables: string } {
-  const lines = text.split(/\r?\n/);
+  const lines = normalizeInlineMarkdownTables(text).split(/\r?\n/);
   const tables: ParsedTable[] = [];
   const outputLines: string[] = [];
   let index = 0;
@@ -642,6 +643,27 @@ function parseMarkdownTables(text: string): { tables: ParsedTable[]; textWithout
     tables,
     textWithoutTables: outputLines.join("\n").trim(),
   };
+}
+
+function normalizeInlineMarkdownTables(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      if (!hasInlineMarkdownTable(line)) {
+        return [line];
+      }
+
+      return line
+        .replace(/\|\s+(?=\|)/g, "|\n")
+        .split(/\n/)
+        .map((row) => row.trim())
+        .filter(Boolean);
+    })
+    .join("\n");
+}
+
+function hasInlineMarkdownTable(line: string): boolean {
+  return /\|\s+\|\s*:?-{3,}/.test(line);
 }
 
 function chartFromTable(table: ParsedTable): ChartSpec | null {

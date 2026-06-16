@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rappi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rappi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-rappi_ops}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
@@ -20,7 +20,7 @@ services:
     build: .
     environment:
       DATA_FILE: /app/data/Sistema de Análisis Inteligente para Operaciones Rappi - Dummy Data (2) (1) (3) (1) (1) (1) (1) (1) (2).xlsx
-      DATABASE_URL: postgresql://${POSTGRES_USER:-rappi}:${POSTGRES_PASSWORD:-rappi}@postgres:5432/${POSTGRES_DB:-rappi_ops}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rappi}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-rappi_ops}
       EXPORT_DIR: /app/outputs
     ports:
       - "${OPS_API_PORT:-8000}:8000"
@@ -36,14 +36,14 @@ services:
     environment:
       TZ: ${TZ:-America/Bogota}
       GENERIC_TIMEZONE: ${TZ:-America/Bogota}
-      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change-me-for-local-dev-only}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: 5678
       N8N_PROTOCOL: http
       WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
       N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-false}
-      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
-      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-admin}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-}
     ports:
       - "${N8N_PORT:-5678}:5678"
     volumes:

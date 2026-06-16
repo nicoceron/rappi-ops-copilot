@@ -57,6 +57,17 @@ def load_env(path: Path) -> dict[str, str]:
     return values
 
 
+def env_value(env: dict[str, str], key: str, default: str | None = None) -> str | None:
+    return env.get(key) or os.environ.get(key) or default
+
+
+def require_env_value(env: dict[str, str], key: str) -> str:
+    value = env_value(env, key)
+    if not value:
+        raise RuntimeError(f"{key} is required in .env or the shell environment")
+    return value
+
+
 def run(command: list[str], *, capture: bool = False) -> str:
     process = subprocess.run(
         command,
@@ -163,9 +174,8 @@ def get_workflow_id(workflows: list[dict[str, Any]], workflow_name: str) -> str:
 
 def credential_payload(existing: list[dict[str, Any]], env: dict[str, str]) -> list[dict[str, Any]]:
     by_name = {item.get("name"): item for item in existing}
-    deepseek_key = env.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
-    if not deepseek_key:
-        raise RuntimeError("DEEPSEEK_API_KEY is required in .env or the shell environment")
+    deepseek_key = require_env_value(env, "DEEPSEEK_API_KEY")
+    postgres_password = require_env_value(env, "POSTGRES_PASSWORD")
 
     credentials: list[dict[str, Any]] = [
         {
@@ -181,9 +191,9 @@ def credential_payload(existing: list[dict[str, Any]], env: dict[str, str]) -> l
             "type": "postgres",
             "data": {
                 "host": "postgres",
-                "database": env.get("POSTGRES_DB", "rappi_ops"),
-                "user": env.get("POSTGRES_USER", "rappi"),
-                "password": env.get("POSTGRES_PASSWORD", "rappi"),
+                "database": env_value(env, "POSTGRES_DB", "rappi_ops"),
+                "user": env_value(env, "POSTGRES_USER", "rappi"),
+                "password": postgres_password,
                 "port": 5432,
                 "ssl": "disable",
                 "allowUnauthorizedCerts": False,

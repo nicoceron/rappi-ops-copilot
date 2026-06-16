@@ -23,6 +23,7 @@ export type ChartConfig = Record<
 
 type ChartCardProps = {
   children: ReactNode;
+  className?: string;
   description?: string;
   footer?: ReactNode;
   title: string;
@@ -36,9 +37,9 @@ type ChartTooltipContentProps = {
   valueFormatter?: (value: ChartValue) => string;
 };
 
-export function ChartCard({ children, description, footer, title }: ChartCardProps) {
+export function ChartCard({ children, className = "", description, footer, title }: ChartCardProps) {
   return (
-    <section className="insight-chart-card">
+    <section className={`insight-chart-card ${className}`.trim()}>
       <div className="insight-chart-header">
         <div>
           <strong>{title}</strong>

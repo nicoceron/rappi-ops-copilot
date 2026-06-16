@@ -1,5 +1,12 @@
+<p align="center">
+  <img src="docs/assets/rappi-ops-readme-hero.svg" alt="Rappi Ops Copilot" width="900">
+</p>
+
 # Rappi Ops Copilot
-<img width="4112" height="2412" alt="Screenshot 2026-06-16 at 12 41 06 PM" src="https://github.com/user-attachments/assets/38e48930-9f32-401e-b870-e682e7e16957" />
+
+<p align="center">
+  <img width="960" alt="Rappi Ops Copilot interface screenshot" src="https://github.com/user-attachments/assets/38e48930-9f32-401e-b870-e682e7e16957" />
+</p>
 
 Rappi Ops Copilot is a reproducible conversational analytics prototype for operational KPI analysis. It combines a deterministic FastAPI analytics service, importable n8n workflows, DeepSeek-powered natural-language orchestration, and a Next.js web interface for asking questions, reviewing executive insights, and exporting results.
 
@@ -62,9 +69,13 @@ cp .env.example .env
 Edit `.env` and set:
 
 ```bash
-DEEPSEEK_API_KEY=your_deepseek_key
-N8N_ENCRYPTION_KEY=replace-with-a-long-random-value
+POSTGRES_PASSWORD=
+DEEPSEEK_API_KEY=
+N8N_ENCRYPTION_KEY=
 ```
+
+Use `openssl rand -base64 32` to generate local values for `POSTGRES_PASSWORD`
+and `N8N_ENCRYPTION_KEY`, then paste the generated values into `.env`.
 
 Install the local Python package before running repository scripts from the host:
 
@@ -117,7 +128,7 @@ If you do not use `scripts/setup_n8n.py`, import these files manually in n8n:
 Then create these credentials:
 
 - `DeepSeek account`: DeepSeek API credential with your API key.
-- `Rappi Ops Postgres`: Postgres credential using host `postgres`, port `5432`, database `rappi_ops`, user `rappi`, and password `rappi`.
+- `Rappi Ops Postgres`: Postgres credential using host `postgres`, port `5432`, database `rappi_ops`, user `rappi`, and the `POSTGRES_PASSWORD` value from `.env`.
 
 Activate both workflows. The automatic insights workflow calls:
 
@@ -184,7 +195,10 @@ python3 scripts/ingest_workbook.py --dry-run
 Load the workbook into local Postgres:
 
 ```bash
-DATABASE_URL=postgresql://rappi:rappi@localhost:5432/rappi_ops \
+set -a
+source .env
+set +a
+DATABASE_URL="postgresql://${POSTGRES_USER:-rappi}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB:-rappi_ops}" \
 python3 scripts/ingest_workbook.py
 ```
 
@@ -226,7 +240,7 @@ Reproducible setup sequence:
 
 ```bash
 cp .env.example .env
-# Fill DEEPSEEK_API_KEY and N8N_ENCRYPTION_KEY in .env
+# Fill POSTGRES_PASSWORD, DEEPSEEK_API_KEY, and N8N_ENCRYPTION_KEY in .env
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
