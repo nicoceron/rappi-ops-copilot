@@ -27,10 +27,12 @@ def ensure_postgres_loaded(database_url: str, data_file: Path, *, force: bool = 
         dataset = load_workbook(data_file)
         with psycopg.connect(database_url) as conn:
             with conn.cursor() as cur:
+                _upsert_zones(cur, dataset.zones)
                 _upsert_city_aliases(cur, dataset.city_aliases)
                 _upsert_metrics(cur, dataset.metrics)
                 _upsert_synonyms(cur, dataset.metric_synonyms)
                 _upsert_metric_facts(cur, dataset.metric_facts)
+                _upsert_order_facts(cur, dataset.order_facts)
             conn.commit()
         return
 

@@ -19,7 +19,14 @@ import {
   Workflow,
 } from "lucide-react";
 import { InsightReportCharts } from "./InsightReportCharts";
-import type { CategoryKey, Finding, InsightReport, Severity } from "./insightTypes";
+import type {
+  AuthoredReportFinding,
+  CategoryKey,
+  Finding,
+  InsightCategory,
+  InsightReport,
+  Severity,
+} from "./insightTypes";
 
 const DEFAULT_API_URL = "http://localhost:8000";
 const FINDING_LIMIT_PER_CATEGORY = 8;
@@ -120,14 +127,20 @@ export function ExecutiveInsights() {
   const [error, setError] = useState<string | null>(null);
 
   const loadReport = useMemo(
-    () => async (options?: { showInitialLoading?: boolean }) => {
+    () => async (options?: { showInitialLoading?: boolean; runWorkflow?: boolean }) => {
       if (options?.showInitialLoading) {
         setLoading(true);
       }
       setRefreshing(!options?.showInitialLoading);
       setError(null);
       try {
-        const response = await fetch(`${apiBase}/insights/latest`, { cache: "no-store" });
+        const response = await fetch(
+          options?.runWorkflow ? `${apiBase}/insights/workflow/run` : `${apiBase}/insights/latest`,
+          {
+            method: options?.runWorkflow ? "POST" : "GET",
+            cache: "no-store",
+          },
+        );
         if (!response.ok) {
           throw new Error(`API returned ${response.status}`);
         }
@@ -175,7 +188,7 @@ export function ExecutiveInsights() {
   }, [apiBase]);
 
   async function refreshReport() {
-    await loadReport();
+    await loadReport({ runWorkflow: true });
   }
 
   return (
@@ -186,9 +199,9 @@ export function ExecutiveInsights() {
           <h2>Executive report</h2>
         </div>
         <div className="report-actions">
-          <button type="button" onClick={refreshReport} disabled={refreshing}>
+          <button type="button" onClick={refreshReport} disabled={loading || refreshing}>
             {refreshing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-            Reload
+            {refreshing ? "Running" : "Reload"}
           </button>
           <a href={`${apiBase}/insights/latest.pdf`} target="_blank" rel="noreferrer">
             <Download size={16} />
@@ -206,7 +219,7 @@ export function ExecutiveInsights() {
         <div className="report-scroll">
           <ReportOverview report={report} />
 
-          <ExecutiveSummary findings={report.executive_summary} />
+          <ExecutiveSummary report={report} />
 
           <InsightReportCharts report={report} />
 
@@ -285,7 +298,9 @@ function ReportOverview({ report }: { report: InsightReport }) {
   );
 }
 
-function ExecutiveSummary({ findings }: { findings: Finding[] }) {
+function ExecutiveSummary({ report }: { report: InsightReport }) {
+  const findings = summaryDisplayFindings(report);
+
   return (
     <section className="executive-summary-section" aria-label="Executive summary">
       <div className="section-heading-row">
@@ -327,7 +342,10 @@ function CategoryDetail({ report }: { report: InsightReport }) {
       <div className="category-grid">
         {report.categories.map((category) => {
           const Icon = categoryIcons[category.key];
-          const displayedFindings = category.findings.slice(0, FINDING_LIMIT_PER_CATEGORY);
+          const authoredSection = report.authored_report?.sections.find(
+            (section) => section.key === category.key,
+          );
+          const displayedFindings = categoryDisplayFindings(report, category);
           return (
             <section className="category-block" key={category.key}>
               <div className="category-heading">
@@ -335,6 +353,9 @@ function CategoryDetail({ report }: { report: InsightReport }) {
                 <strong>{category.title}</strong>
                 <span>{category.findings.length}</span>
               </div>
+              {authoredSection?.narrative ? (
+                <p className="category-narrative">{authoredSection.narrative}</p>
+              ) : null}
               <div className="finding-list">
                 {displayedFindings.map((finding) => (
                   <FindingRow finding={finding} key={finding.id} />
@@ -374,6 +395,53 @@ function FindingRow({ finding }: { finding: Finding }) {
       ) : null}
     </article>
   );
+}
+
+function summaryDisplayFindings(report: InsightReport): Finding[] {
+  const authoredItems = report.authored_report?.executive_summary ?? [];
+  if (authoredItems.length) {
+    const findings = authoredItems
+      .map((item) => authoredDisplayFinding(item, report))
+      .filter((finding): finding is Finding => finding !== null);
+    if (findings.length) {
+      return findings.slice(0, 5);
+    }
+  }
+  return report.executive_summary.slice(0, 5);
+}
+
+function categoryDisplayFindings(report: InsightReport, category: InsightCategory): Finding[] {
+  const authoredItems =
+    report.authored_report?.sections.find((section) => section.key === category.key)?.findings ??
+    [];
+  if (authoredItems.length) {
+    const findings = authoredItems
+      .map((item) => authoredDisplayFinding(item, report))
+      .filter((finding): finding is Finding => finding !== null)
+      .filter((finding) => finding.category === category.key);
+    if (findings.length) {
+      return findings.slice(0, FINDING_LIMIT_PER_CATEGORY);
+    }
+  }
+  return category.findings.slice(0, FINDING_LIMIT_PER_CATEGORY);
+}
+
+function authoredDisplayFinding(
+  item: AuthoredReportFinding,
+  report: InsightReport,
+): Finding | null {
+  const source = report.categories
+    .flatMap((category) => category.findings)
+    .find((finding) => finding.id === item.finding_id);
+  if (!source) {
+    return null;
+  }
+  return {
+    ...source,
+    recommendation: item.recommendation || source.recommendation,
+    summary: item.insight || source.summary,
+    title: item.headline || source.title,
+  };
 }
 
 function DataCaveats({ caveats }: { caveats: string[] }) {

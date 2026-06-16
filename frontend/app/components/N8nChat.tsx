@@ -19,6 +19,8 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
@@ -47,7 +49,7 @@ type ParsedTable = {
 
 type ChartSpec = {
   id: string;
-  type: "bar" | "line";
+  type: "bar" | "line" | "scatter";
   title: string;
   xKey: string;
   yKeys: string[];
@@ -379,6 +381,8 @@ function ResultTable({ table }: { table: ParsedTable }) {
 
 function ChartCard({ chart }: { chart: ChartSpec }) {
   const isLine = chart.type === "line";
+  const isScatter = chart.type === "scatter";
+  const primaryYKey = chart.yKeys[0];
 
   return (
     <section className="chart-card">
@@ -388,7 +392,40 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
       </div>
       <div className="chart-canvas">
         <ResponsiveContainer width="100%" height="100%">
-          {isLine ? (
+          {isScatter ? (
+            <ScatterChart margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis
+                dataKey={chart.xKey}
+                name={chart.xKey}
+                tick={{ fill: "#ffffff99", fontSize: 11 }}
+                type="number"
+              />
+              <YAxis
+                dataKey={primaryYKey}
+                name={primaryYKey}
+                tick={{ fill: "#ffffff99", fontSize: 11 }}
+                type="number"
+                width={42}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "#111111",
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  borderRadius: 8,
+                  color: "#fafafa",
+                }}
+                cursor={{ stroke: "rgba(255,255,255,0.28)" }}
+                itemStyle={{ color: "#fafafa" }}
+                labelStyle={{ color: "#ffffff99" }}
+              />
+              <Scatter data={chart.data} name={`${primaryYKey} by ${chart.xKey}`}>
+                {chart.data.map((_, pointIndex) => (
+                  <Cell key={`${chart.id}-point-${pointIndex}`} fill={CHART_COLORS[pointIndex % CHART_COLORS.length]} />
+                ))}
+              </Scatter>
+            </ScatterChart>
+          ) : isLine ? (
             <LineChart data={chart.data} margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
               <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
@@ -598,7 +635,10 @@ function buildMessagePresentation(message: ChatMessage) {
   const structuredTables = message.structured?.tables ?? [];
   const tables = [...structuredTables, ...markdownTables.tables];
   const structuredCharts = message.structured?.charts ?? [];
-  const heuristicCharts = tables.map((table) => chartFromTable(table)).filter(Boolean) as ChartSpec[];
+  const requestedChartType = inferRequestedChartType(message.text);
+  const heuristicCharts = tables
+    .map((table) => chartFromTable(table, requestedChartType))
+    .filter(Boolean) as ChartSpec[];
   const exports = [
     ...(message.structured?.exports ?? []),
     ...extractExportLinks(message.text),
@@ -679,12 +719,17 @@ function hasInlineMarkdownTable(line: string): boolean {
   return /\|\s+\|\s*:?-{3,}/.test(line);
 }
 
-function chartFromTable(table: ParsedTable): ChartSpec | null {
+function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | null = null): ChartSpec | null {
   if (table.rows.length < 2 || table.headers.length < 2) {
     return null;
   }
 
   const headers = table.headers.filter((header) => header !== "#");
+
+  if (requestedType === "scatter") {
+    return scatterChartFromTable(table, headers);
+  }
+
   const xKey = selectCategoryKey(headers, table.rows);
   const yKeys = headers
     .filter((header) => header !== xKey)
@@ -720,10 +765,64 @@ function chartFromTable(table: ParsedTable): ChartSpec | null {
 
   return {
     id: createId("chart"),
-    type: isTrend ? "line" : "bar",
+    type: requestedType === "line" || isTrend ? "line" : "bar",
     title,
     xKey,
     yKeys,
+    data,
+  };
+}
+
+function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec | null {
+  const numericKeys = headers.filter((header) =>
+    table.rows.some((row) => parseMetricValue(row[header]) !== null),
+  );
+
+  if (numericKeys.length < 2) {
+    return null;
+  }
+
+  const xKey = numericKeys.find(isCountLikeKey) ?? numericKeys[0];
+  const yKey =
+    numericKeys.find((key) => key !== xKey && !isCountLikeKey(key) && !isMinMaxLikeKey(key)) ??
+    numericKeys.find((key) => key !== xKey);
+
+  if (!yKey) {
+    return null;
+  }
+
+  const labelKey = headers.find((header) => !numericKeys.includes(header));
+  const data = table.rows
+    .map((row) => {
+      const xValue = parseMetricValue(row[xKey]);
+      const yValue = parseMetricValue(row[yKey]);
+      if (xValue === null || yValue === null) {
+        return null;
+      }
+
+      const point: Record<string, string | number> = {
+        [xKey]: xValue,
+        [yKey]: yValue,
+      };
+
+      if (labelKey) {
+        point[labelKey] = stripMarkdown(row[labelKey] || "");
+      }
+
+      return point;
+    })
+    .filter((point): point is Record<string, string | number> => Boolean(point));
+
+  if (data.length < 2) {
+    return null;
+  }
+
+  return {
+    id: createId("chart"),
+    type: "scatter",
+    title: `Scatter: ${yKey} by ${xKey}`,
+    xKey,
+    yKeys: [yKey],
     data,
   };
 }
@@ -790,27 +889,48 @@ function normalizeCharts(value: unknown): ChartSpec[] {
       : typeof yCandidate === "string"
         ? [yCandidate]
         : [];
+    const type = normalizeChartType(item.type);
 
     if (!xKey || yKeys.length === 0 || data.length === 0) {
+      return [];
+    }
+
+    const rows = data
+      .map((row) => normalizeChartRow(row, xKey, yKeys, type))
+      .filter((row) => {
+        if (type !== "scatter") {
+          return true;
+        }
+
+        return typeof row[xKey] === "number" && typeof row[yKeys[0]] === "number";
+      });
+
+    if (rows.length === 0) {
       return [];
     }
 
     return [
       {
         id: `structured-chart-${index}`,
-        type: item.type === "line" ? "line" : "bar",
+        type,
         title: firstString(item.title) || "Chart",
         xKey,
         yKeys,
-        data: data.map((row) => normalizeChartRow(row, xKey, yKeys)),
+        data: rows,
       },
     ];
   });
 }
 
-function normalizeChartRow(row: Record<string, unknown>, xKey: string, yKeys: string[]) {
+function normalizeChartRow(
+  row: Record<string, unknown>,
+  xKey: string,
+  yKeys: string[],
+  type: ChartSpec["type"],
+) {
+  const parsedX = parseMetricValue(row[xKey]);
   const normalized: Record<string, string | number> = {
-    [xKey]: String(row[xKey] ?? ""),
+    [xKey]: type === "scatter" && parsedX !== null ? parsedX : String(row[xKey] ?? ""),
   };
 
   yKeys.forEach((key) => {
@@ -821,6 +941,46 @@ function normalizeChartRow(row: Record<string, unknown>, xKey: string, yKeys: st
   });
 
   return normalized;
+}
+
+function inferRequestedChartType(text: string): ChartSpec["type"] | null {
+  if (/\b(scatter|dispersi[oó]n|bubble|burbuja)\b/i.test(text)) {
+    return "scatter";
+  }
+
+  if (/\b(line|l[ií]nea|trend|tendencia|area|time series|serie temporal|evoluci[oó]n)\b/i.test(text)) {
+    return "line";
+  }
+
+  if (/\b(bar|barra|column|columna|histogram|histograma|pie|donut|dona)\b/i.test(text)) {
+    return "bar";
+  }
+
+  return null;
+}
+
+function normalizeChartType(value: unknown): ChartSpec["type"] {
+  if (typeof value !== "string") {
+    return "bar";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "scatter" || normalized === "bubble") {
+    return "scatter";
+  }
+  if (normalized === "line" || normalized === "area" || normalized === "trend") {
+    return "line";
+  }
+
+  return "bar";
+}
+
+function isCountLikeKey(key: string): boolean {
+  return /zonas|zones|count|cantidad|n_|num|total/i.test(key);
+}
+
+function isMinMaxLikeKey(key: string): boolean {
+  return /mín|min|max|máx/i.test(key);
 }
 
 function normalizeExports(value: unknown): ExportLink[] {

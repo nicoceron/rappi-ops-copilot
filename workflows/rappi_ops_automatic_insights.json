@@ -34,11 +34,30 @@
     },
     {
       "parameters": {
+        "httpMethod": "POST",
+        "path": "rappi-ops-executive-insights/run",
+        "authentication": "none",
+        "responseMode": "lastNode",
+        "responseData": "noData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -620,
+        300
+      ],
+      "id": "b13aa02a-8b58-42ad-8e72-d162f077a860",
+      "name": "Web reload trigger",
+      "webhookId": "rappi-ops-executive-insights-run"
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "http://ops-api:8000/insights/generate",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"source\": \"n8n_schedule\",\n  \"persist\": true\n}",
+        "jsonBody": "{\n  \"source\": \"n8n_schedule\",\n  \"persist\": true,\n  \"authoring_mode\": \"llm\"\n}",
         "options": {
           "timeout": 120000
         }
@@ -51,6 +70,26 @@
       ],
       "id": "61396eef-ef21-4c15-ae66-1a4518950865",
       "name": "Generate executive insights"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ops-api:8000/insights/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"source\": \"n8n_web_reload\",\n  \"persist\": true,\n  \"authoring_mode\": \"llm\"\n}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -280,
+        300
+      ],
+      "id": "9e72e5f7-7015-4fb9-8aa7-41ff0a8293d5",
+      "name": "Generate executive insights from reload"
     },
     {
       "parameters": {
@@ -100,7 +139,29 @@
         ]
       ]
     },
+    "Web reload trigger": {
+      "main": [
+        [
+          {
+            "node": "Generate executive insights from reload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Generate executive insights": {
+      "main": [
+        [
+          {
+            "node": "Fetch executive PDF artifact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate executive insights from reload": {
       "main": [
         [
           {

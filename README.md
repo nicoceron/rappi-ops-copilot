@@ -14,8 +14,9 @@ The solution is designed for an operations user who wants to ask questions such 
 - A normalized analytics layer built from the provided dummy operations workbook,
   including city-alias lookup, source duplicate removal, and explicit outlier flags.
 - Read-only SQL execution guardrails for model-generated queries.
-- CSV and PDF exports for query results.
-- An automatic executive insights report with Markdown, HTML, LaTeX, JSON, API, and UI access.
+- CSV and LaTeX-generated PDF report exports for query results.
+- An automatic executive insights report with deterministic facts, optional LLM-authored
+  structured narrative JSON, Markdown, HTML, LaTeX, PDF, API, and UI access.
 - Importable n8n workflow JSON files for the chat agent and scheduled insights job.
 - Deterministic smoke tests that validate the core analytics behavior.
 
@@ -29,8 +30,10 @@ The solution is designed for an operations user who wants to ask questions such 
 2. On API startup, the workbook is loaded into Postgres when `DATABASE_URL` is available.
 3. The FastAPI service exposes schema context, semantic query helpers, guarded SQL execution, exports, and executive insights endpoints.
 4. The n8n chat workflow uses DeepSeek `deepseek-v4-pro` to translate natural-language requests into read-only analytical queries and API calls.
-5. The Next.js app embeds the public n8n Chat Trigger and displays the latest generated executive insight report.
-6. The scheduled n8n workflow refreshes the executive report every Monday at 07:00 in `America/Bogota`.
+5. The executive insights workflow computes facts deterministically, can ask DeepSeek for
+   a structured narrative layer, and renders the final PDF from a deterministic LaTeX template.
+6. The Next.js app embeds the public n8n Chat Trigger and displays the latest generated executive insight report.
+7. The scheduled n8n workflow refreshes the executive report every Monday at 07:00 in `America/Bogota`.
 
 The model can generate SQL, but the API only accepts a single `SELECT` or `WITH` statement, strips trailing semicolons, blocks write/admin keywords, rejects comments, executes through a read-only Postgres connection, and wraps the query with a server-side row limit.
 
@@ -55,13 +58,15 @@ The model can generate SQL, but the API only accepts a single `SELECT` or `WITH`
 
 - Docker and Docker Compose.
 - Python 3.11+ for local scripts.
-- A DeepSeek API key for live chat answers through n8n.
+- A DeepSeek API key for live chat answers through n8n and for LLM-authored scheduled reports.
 - Optional for non-Docker API hosts: `tectonic`, `latexmk`, `xelatex`, or `pdflatex` to
   compile the LaTeX executive report into PDF. The included API Docker image installs the
   required TeX Live packages. If compilation fails and `DEEPSEEK_API_KEY` is available to
   the API service, the report retries with an LLM-based LaTeX repair loop.
 
-The deterministic API, ingestion, and smoke tests can run without a DeepSeek key. The n8n agent needs `DEEPSEEK_API_KEY` to call the model.
+The deterministic API, ingestion, and smoke tests can run without a DeepSeek key. The n8n
+chat agent and `authoring_mode: "llm"` scheduled insights report need `DEEPSEEK_API_KEY`
+to call the model.
 
 ## Local Quickstart
 
@@ -144,6 +149,19 @@ POST http://ops-api:8000/insights/generate
 GET  http://ops-api:8000/insights/latest.pdf
 ```
 
+It also exposes a production reload webhook used by the web UI through the Ops API wrapper:
+
+```text
+POST http://localhost:8000/insights/workflow/run
+POST http://localhost:5678/webhook/rappi-ops-executive-insights/run
+```
+
+The imported automatic insights workflow sends `authoring_mode: "llm"`, so the API asks
+DeepSeek for validated report narrative JSON before rendering LaTeX/PDF. Use
+`authoring_mode: "deterministic"` for a model-free report or `authoring_mode: "auto"` to
+use DeepSeek when `DEEPSEEK_API_KEY` is configured and otherwise fall back to deterministic
+copy.
+
 See `workflows/README.md` for the workflow-specific import notes.
 
 ## API Usage
@@ -165,8 +183,9 @@ Generate or read the latest executive insight report:
 ```bash
 curl -X POST http://localhost:8000/insights/generate \
   -H 'Content-Type: application/json' \
-  -d '{"source":"manual","persist":true}'
+  -d '{"source":"manual","persist":true,"authoring_mode":"auto"}'
 
+curl -X POST http://localhost:8000/insights/workflow/run
 curl http://localhost:8000/insights/latest
 curl http://localhost:8000/insights/latest.md
 curl http://localhost:8000/insights/latest.html
@@ -174,11 +193,16 @@ curl http://localhost:8000/insights/latest.tex
 curl -OJ http://localhost:8000/insights/latest.pdf
 ```
 
-The LaTeX source is always generated. The PDF endpoint compiles that source when a local
-TeX compiler is available. If the compiler fails, the API sends the compiler log, generated
-LaTeX, and structured report context to DeepSeek, asks for a corrected full `.tex` document,
-and retries up to `LATEX_REPAIR_ATTEMPTS`. The final repaired source is written back to
-`outputs/reports/latest-executive-insights.tex`, with repair notes beside it.
+The report JSON is the source of truth. When `authoring_mode` is `llm`, DeepSeek writes
+only the structured narrative fields; Python still owns metrics, evidence, chart data, and
+LaTeX rendering. Insight generation validates the cleaned `load_workbook` dataset first:
+duplicate fact keys must be gone, invalid rate values must be flagged as outliers, and
+flagged source outliers are excluded from scoring before the LLM sees the factsheet. The
+LaTeX source is always generated from that JSON. The PDF endpoint compiles the source when
+a local TeX compiler is available. If compilation fails, the API sends the compiler log,
+generated LaTeX, and structured report context to DeepSeek, asks for a corrected full
+`.tex` document, and retries up to `LATEX_REPAIR_ATTEMPTS`. The final repaired source is
+written back to `outputs/reports/latest-executive-insights.tex`, with repair notes beside it.
 
 Run a guarded model-facing SQL query:
 
@@ -206,6 +230,9 @@ download URLs. The n8n export tool uses the same metadata endpoint:
 ```bash
 curl http://localhost:8000/exports/<query_id>/links?format=both
 ```
+
+The query PDF export is rendered from deterministic LaTeX and compiled by the API.
+The matching `.tex` source and PDF are written under `outputs/query-exports/`.
 
 ## Data Ingestion
 
@@ -285,3 +312,4 @@ If the DeepSeek account has no available balance, the API and deterministic smok
 - If the web chat says the workflow failed, open n8n at `http://localhost:5678` and inspect the latest execution.
 - If the Chat Trigger URL changes after manual import, update `NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL` in `.env` and restart the `web` service.
 - If exports return `404`, rerun the query first. Export IDs are cached in memory for the current API process.
+- If PDF exports return `503`, confirm the API host has `tectonic`, `latexmk`, `xelatex`, or `pdflatex`. The Docker API image includes the required TeX packages.

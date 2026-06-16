@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 
 from ops_copilot.data_loader import load_workbook
 from ops_copilot.insights import generate_executive_insight_report
+from ops_copilot.latex_report import render_query_result_latex
 from ops_copilot.models import SemanticQuery
 from ops_copilot.query_engine import QueryEngine
 from ops_copilot.settings import default_data_file
@@ -190,6 +191,10 @@ def main() -> None:
             cities = {row["city"] for row in result.rows}
             if cities != {"Ciudad Guzman"}:
                 raise SystemExit(f"generated cd alias city filter: unexpected cities {cities}")
+        if name == "wealthy comparison mx":
+            latex = render_query_result_latex(result)
+            if "\\documentclass" not in latex or "Rappi Ops Query Export" not in latex:
+                raise SystemExit("query export: expected standalone LaTeX report")
         print(f"ok {name}: {result.row_count} rows ({result.answer_type})")
 
     report = generate_executive_insight_report(engine.dataset, source="smoke_test")
@@ -207,6 +212,12 @@ def main() -> None:
         raise SystemExit("insights: expected executive summary findings")
     if "# Rappi Ops Executive Insight Report" not in report.markdown:
         raise SystemExit("insights: expected markdown output")
+    if report.data_quality.get("metric_fact_duplicate_keys") != 0:
+        raise SystemExit("insights: report did not use duplicate-free cleaned metric facts")
+    if report.data_quality.get("order_fact_duplicate_keys") != 0:
+        raise SystemExit("insights: report did not use duplicate-free cleaned order facts")
+    if report.data_quality.get("insight_outlier_exclusion_applied") is not True:
+        raise SystemExit("insights: expected outlier exclusion marker on report")
     print(f"ok automatic insights: {category_counts}")
 
 

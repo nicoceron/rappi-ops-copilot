@@ -119,6 +119,29 @@ class InsightCategory(BaseModel):
     findings: list[InsightFinding]
 
 
+class AuthoredReportFinding(BaseModel):
+    finding_id: str
+    headline: str
+    insight: str
+    recommendation: str
+
+
+class AuthoredReportSection(BaseModel):
+    key: InsightCategoryKey
+    title: str
+    narrative: str
+    findings: list[AuthoredReportFinding] = Field(default_factory=list)
+
+
+class AuthoredInsightReport(BaseModel):
+    title: str = "Rappi Ops Executive Insight Report"
+    subtitle: str
+    opening_note: str
+    executive_summary: list[AuthoredReportFinding]
+    sections: list[AuthoredReportSection]
+    closing_note: str = ""
+
+
 class InsightReport(BaseModel):
     report_id: str
     generated_at: str
@@ -127,12 +150,15 @@ class InsightReport(BaseModel):
     executive_summary: list[InsightFinding]
     categories: list[InsightCategory]
     markdown: str
+    authored_report: AuthoredInsightReport | None = None
+    data_quality: dict[str, Any] = Field(default_factory=dict)
     data_caveats: list[str] = Field(default_factory=list)
 
 
 def generate_executive_insight_report(
     dataset: OperationalDataset, *, source: str = "api"
 ) -> InsightReport:
+    _assert_clean_dataset(dataset)
     facts = _fact_frame(dataset)
     catalog = _metric_catalog(dataset)
 
@@ -174,6 +200,11 @@ def generate_executive_insight_report(
         executive_summary=executive_summary,
         categories=categories,
         markdown="",
+        data_quality={
+            **dataset.data_quality,
+            "clean_data_contract": "ops_copilot.data_loader.load_workbook",
+            "insight_outlier_exclusion_applied": True,
+        },
         data_caveats=[
             "The dataset uses relative weeks. L0W is the latest available week, not a calendar date.",
             "Rate metrics are simple stored values. The workbook does not provide denominators for weighted averages.",
@@ -185,7 +216,41 @@ def generate_executive_insight_report(
     return report
 
 
+def _assert_clean_dataset(dataset: OperationalDataset) -> None:
+    quality = dataset.data_quality
+    failures = []
+    if int(quality.get("metric_fact_duplicate_keys", 0)) != 0:
+        failures.append("metric fact duplicate keys remain after cleanup")
+    if int(quality.get("order_fact_duplicate_keys", 0)) != 0:
+        failures.append("order fact duplicate keys remain after cleanup")
+
+    metric_facts = dataset.metric_facts.merge(
+        dataset.metrics[["metric_key", "value_kind", "outlier_policy"]],
+        on="metric_key",
+        how="left",
+    )
+    rate_facts = metric_facts[metric_facts["value_kind"].eq("rate")]
+    invalid_unflagged_rates = rate_facts[
+        ((rate_facts["value"] < 0) | (rate_facts["value"] > 1))
+        & ~rate_facts["is_outlier"].fillna(False)
+    ]
+    if not invalid_unflagged_rates.empty:
+        sample = invalid_unflagged_rates[
+            ["zone_id", "metric_key", "week_label", "value"]
+        ].head(5)
+        failures.append(
+            "invalid unflagged rate metric values remain after cleanup: "
+            f"{sample.to_dict(orient='records')}"
+        )
+
+    if failures:
+        raise ValueError("Insight report requires cleaned data. " + "; ".join(failures))
+
+
 def render_report_markdown(report: InsightReport) -> str:
+    if report.authored_report:
+        return _render_authored_report_markdown(report)
+
     lines = [
         "# Rappi Ops Executive Insight Report",
         "",
@@ -235,6 +300,68 @@ def render_report_markdown(report: InsightReport) -> str:
 
     lines.extend(["", "## Data caveats", ""])
     for caveat in report.data_caveats[:2]:
+        lines.append(f"- {caveat}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_authored_report_markdown(report: InsightReport) -> str:
+    authored = report.authored_report
+    if authored is None:
+        return render_report_markdown(report)
+
+    findings_by_id = {
+        finding.id: finding
+        for category in report.categories
+        for finding in category.findings
+    }
+    lines = [
+        f"# {authored.title}",
+        "",
+        authored.subtitle or report.period_label,
+        "",
+        authored.opening_note,
+        "",
+        "## Executive summary",
+        "",
+    ]
+    for index, item in enumerate(authored.executive_summary, start=1):
+        source = findings_by_id.get(item.finding_id)
+        severity = source.severity.upper() if source else "INFO"
+        lines.extend(
+            [
+                f"{index}. **[{severity}] {item.headline}**",
+                f"   - {item.insight}",
+                f"   - Action: {item.recommendation}",
+            ]
+        )
+
+    lines.extend(["", "## Detail by insight category", ""])
+    for section in authored.sections:
+        lines.extend(["", f"### {section.title}", "", section.narrative, ""])
+        if not section.findings:
+            lines.append("No findings detected for this category.")
+            continue
+        for item in section.findings:
+            source = findings_by_id.get(item.finding_id)
+            severity = source.severity.upper() if source else "INFO"
+            lines.extend(
+                [
+                    f"- **[{severity}] {item.headline}**",
+                    f"  - Insight: {item.insight}",
+                    f"  - Action: {item.recommendation}",
+                ]
+            )
+            if source:
+                evidence = _evidence_text(source.evidence)
+                if evidence:
+                    lines.append(f"  - Evidence: {evidence}")
+
+    if authored.closing_note:
+        lines.extend(["", "## Closing note", "", authored.closing_note])
+
+    lines.extend(["", "## Data caveats", ""])
+    for caveat in report.data_caveats[:4]:
         lines.append(f"- {caveat}")
     lines.append("")
     return "\n".join(lines)
