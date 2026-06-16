@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rappi-ops-copilot"
+version = "0.1.0"
+description = "Deterministic analytics API and n8n workflow assets for the Rappi Ops Copilot."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pandas>=2.2",
+  "openpyxl>=3.1",
+  "psycopg[binary]>=3.2",
+  "pydantic>=2.8",
+  "reportlab>=4.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.8",
+]
+
+[tool.setuptools.packages.find]
+include = ["ops_copilot*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
