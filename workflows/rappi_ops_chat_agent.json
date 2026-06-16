@@ -1,0 +1,314 @@
+{
+  "name": "Rappi Ops Copilot - DeepSeek Chat Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -760,
+        -120
+      ],
+      "id": "b3892c4d-2bbf-4654-b5ca-f6acb91f8cc0",
+      "name": "When chat message received",
+      "webhookId": "b2a0878f-58c7-4f89-a98b-2dc29cd637a8"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "You are Rappi Ops Copilot, a bilingual Spanish/English analytics assistant for operations metrics.\n\nYour job is to answer questions using the available operational dataset, not general knowledge. Always use tools before giving numeric answers.\n\nRules:\n- Interpret arbitrary natural language into a structured analytical request.\n- Use Get Schema when you need metric names, dimensions, valid values, or business definitions.\n- Use Query Ops Metrics for every numeric answer, ranking, comparison, trend, aggregation, diagnosis, or export setup.\n- Do not invent metrics, calendar dates, denominators, causes, or unavailable dimensions.\n- The data uses relative weeks. L0W means the most recent available week. Last 8 weeks means L7W through L0W unless the user says otherwise.\n- If the user asks in Spanish, answer in Spanish. If the user asks in English, answer in English.\n- For ambiguous wording, make a reasonable default when safe and state it. Ask a concise clarification only when the answer would be materially different.\n- For zonas problematicas, interpret this as zones with deteriorated or weak metrics using the diagnosis intent.\n- For inference questions, explain likely drivers as hypotheses based on observed metric relationships. Do not claim causality.\n- Include period, filters, aggregation method, and caveats when relevant.\n- Suggest 2 or 3 useful follow-up analyses after substantive answers.\n- If a chart is useful, describe the returned chart recommendation from the tool.\n- If the user asks to export, use Export Result with the query_id from the previous Query Ops Metrics response."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        -420,
+        -120
+      ],
+      "id": "80e411a3-713f-4a3c-b68b-d7ed1e77717c",
+      "name": "Rappi Ops Agent"
+    },
+    {
+      "parameters": {
+        "model": "=deepseek-v4-pro",
+        "options": {
+          "temperature": 0.1,
+          "maxTokens": 4096
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        140
+      ],
+      "id": "967f9cfe-a23b-471b-a150-0f1a0c9fb41c",
+      "name": "DeepSeek V4 Pro",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('When chat message received').item.json.sessionId }}",
+        "tableName": "rappi_ops_chat_memory",
+        "contextWindowLength": 20
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        -360,
+        140
+      ],
+      "id": "81ed89a9-5449-4d9f-9e7a-cfdde6fc7ad2",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "",
+          "name": "Rappi Ops Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this first when you need the current metric catalog, valid dimensions, countries, segment labels, synonyms, or relative-week semantics for the Rappi operations dataset.",
+        "method": "POST",
+        "url": "http://ops-api:8000/schema",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"include_examples\": true,\n  \"language\": \"{language}\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "language",
+              "type": "string",
+              "description": "User language. Use es, en, or auto."
+            }
+          ]
+        },
+        "optimizeResponse": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        -160,
+        140
+      ],
+      "id": "3abfd36f-0a2e-41af-8ffd-0cc8c2195885",
+      "name": "Get Schema"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Execute a deterministic analytics query against Rappi operational metrics. Fill every placeholder with valid JSON according to the schema. Supported intents: lookup, rank, aggregate, compare, trend, segment, diagnose, growth, correlate. Metrics must use canonical names from Get Schema. Relative period examples: current week {\"type\":\"relative_weeks\",\"start_offset\":0,\"end_offset\":0}; last 8 weeks {\"type\":\"relative_weeks\",\"start_offset\":7,\"end_offset\":0}; last 5 weeks {\"type\":\"relative_weeks\",\"start_offset\":4,\"end_offset\":0}. Filters can include country, city, zone, zone_type, zone_prioritization. Use country codes or country names.",
+        "method": "POST",
+        "url": "http://ops-api:8000/query",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"question\": \"{question}\",\n  \"language\": \"{language}\",\n  \"intent\": \"{intent}\",\n  \"metrics\": {metrics},\n  \"dimensions\": {dimensions},\n  \"filters\": {filters},\n  \"period\": {period},\n  \"aggregation\": \"{aggregation}\",\n  \"sort\": {sort},\n  \"limit\": {limit},\n  \"visualization\": \"{visualization}\",\n  \"outlier_policy\": \"{outlier_policy}\",\n  \"include_diagnostics\": {include_diagnostics},\n  \"diagnostic_metrics\": {diagnostic_metrics}\n}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "question",
+              "type": "string",
+              "description": "Original user question."
+            },
+            {
+              "name": "language",
+              "type": "string",
+              "description": "Use es, en, or auto."
+            },
+            {
+              "name": "intent",
+              "type": "string",
+              "description": "One of lookup, rank, aggregate, compare, trend, segment, diagnose, growth, correlate."
+            },
+            {
+              "name": "metrics",
+              "type": "json",
+              "description": "JSON array of canonical metric names, for example [\"Lead Penetration\"]. Use [] only for diagnose when default diagnostic metrics are desired."
+            },
+            {
+              "name": "dimensions",
+              "type": "json",
+              "description": "JSON array of dimensions: country, city, zone, zone_type, zone_prioritization, week_offset, week_label."
+            },
+            {
+              "name": "filters",
+              "type": "json",
+              "description": "JSON object of filters, for example {\"country\":[\"MX\"],\"zone_type\":[\"Wealthy\"]}. Use {} when no filters are needed."
+            },
+            {
+              "name": "period",
+              "type": "json",
+              "description": "JSON object with type relative_weeks, start_offset, end_offset."
+            },
+            {
+              "name": "aggregation",
+              "type": "string",
+              "description": "One of none, avg, sum, min, max, median, pct_change, absolute_change."
+            },
+            {
+              "name": "sort",
+              "type": "json",
+              "description": "JSON array like [{\"field\":\"value\",\"direction\":\"desc\"}], or [] for default sorting."
+            },
+            {
+              "name": "limit",
+              "type": "number",
+              "description": "Maximum rows to return, 1 to 500."
+            },
+            {
+              "name": "visualization",
+              "type": "string",
+              "description": "One of table, bar, line, scatter, none."
+            },
+            {
+              "name": "outlier_policy",
+              "type": "string",
+              "description": "One of flag, exclude, none. Use flag for Lead Penetration unless the user asks otherwise."
+            },
+            {
+              "name": "include_diagnostics",
+              "type": "boolean",
+              "description": "true for inference/growth questions that ask what might explain the result."
+            },
+            {
+              "name": "diagnostic_metrics",
+              "type": "json",
+              "description": "JSON array of extra metrics to attach for diagnostics, or [] when not needed."
+            }
+          ]
+        },
+        "optimizeResponse": false
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        60,
+        140
+      ],
+      "id": "d5422234-7145-4a91-b3f6-aaec3df5b79c",
+      "name": "Query Ops Metrics"
+    },
+    {
+      "parameters": {
+        "toolDescription": "Export a previous Query Ops Metrics result as CSV or PDF. Use the query_id from the previous tool response. Supported format values: csv, pdf.",
+        "method": "GET",
+        "url": "http://ops-api:8000/exports/{query_id}.{format}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "query_id",
+              "type": "string",
+              "description": "The query_id returned by Query Ops Metrics."
+            },
+            {
+              "name": "format",
+              "type": "string",
+              "description": "csv or pdf."
+            }
+          ]
+        },
+        "optimizeResponse": false
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        300,
+        140
+      ],
+      "id": "2e3c6dbd-7d76-4e77-98a6-99b934af87d1",
+      "name": "Export Result"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Rappi Ops Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek V4 Pro": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Rappi Ops Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Rappi Ops Agent",
+            "type": "ai_memory",
+            "index": 0
+          },
+          {
+            "node": "When chat message received",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Schema": {
+      "ai_tool": [
+        [
+          {
+            "node": "Rappi Ops Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Ops Metrics": {
+      "ai_tool": [
+        [
+          {
+            "node": "Rappi Ops Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export Result": {
+      "ai_tool": [
+        [
+          {
+            "node": "Rappi Ops Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1568f8de-06c5-40a6-ad05-5554342f9887",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
