@@ -128,9 +128,10 @@ API:     http://localhost:8000/health
 
 ## Validate
 
-Run the deterministic smoke test:
+Run the contract tests and deterministic smoke test:
 
 ```bash
+python -m pytest
 python3 scripts/smoke_test.py
 ```
 
@@ -154,6 +155,7 @@ The project is reproducible because it includes:
 - Frontend lockfile in `frontend/package-lock.json`
 - n8n workflow exports in `workflows/`
 - Environment template in `.env.example`
+- Pytest contract tests in `tests/`
 - Setup automation in `scripts/setup_n8n.py`
 - Smoke test in `scripts/smoke_test.py`
 

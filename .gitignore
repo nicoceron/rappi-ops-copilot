@@ -13,4 +13,5 @@ __pycache__/
 .n8n/
 outputs/
 tmp/
+dogfood-output/
 *.log
