@@ -399,7 +399,7 @@ def repair_latex_with_deepseek(
 
     prompt = _latex_repair_prompt(tex_source, compiler_error, context, attempt)
     payload = {
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"),
         "messages": [
             {
                 "role": "system",

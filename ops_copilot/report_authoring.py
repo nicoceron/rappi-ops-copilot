@@ -34,7 +34,7 @@ def author_report_with_deepseek(report: InsightReport) -> AuthoredInsightReport:
 
     prompt = _authoring_prompt(report)
     payload = {
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-pro"),
         "messages": [
             {
                 "role": "system",

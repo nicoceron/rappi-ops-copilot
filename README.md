@@ -68,6 +68,27 @@ The deterministic API, ingestion, and smoke tests can run without a DeepSeek key
 chat agent and `authoring_mode: "llm"` scheduled insights report need `DEEPSEEK_API_KEY`
 to call the model.
 
+## Estimated API Cost
+
+This project uses the paid DeepSeek API only for the n8n chat agent and optional
+LLM-authored report text. The configured model is `deepseek-v4-pro`.
+
+Based on DeepSeek's published V4 Pro pricing of `$0.435` per 1M uncached input
+tokens, `$0.003625` per 1M cached input tokens, and `$0.87` per 1M output tokens,
+a typical 10-question analytics chat session is estimated at about `$0.10`.
+That estimate assumes roughly 150k uncached input tokens and 30k output tokens
+across the session, including tool-planning prompts, schema context, SQL results,
+and final answers. Short sessions or cache hits cost less; longer answers,
+retries, or very large result context cost more.
+
+Generating the scheduled executive insight narrative usually adds about `$0.01`
+to `$0.02` per report, plus a similar amount only if the optional LLM LaTeX
+repair loop is triggered. Deterministic API calls, ingestion, smoke tests, CSV
+exports, and deterministic PDF rendering do not call paid APIs.
+
+Check the official DeepSeek pricing page before production use because token
+prices can change: https://api-docs.deepseek.com/quick_start/pricing
+
 ## Local Quickstart
 
 Create the local environment file:
@@ -81,7 +102,7 @@ Edit `.env` and set:
 ```bash
 POSTGRES_PASSWORD=
 DEEPSEEK_API_KEY=
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-pro
 LATEX_REPAIR_ATTEMPTS=2
 N8N_ENCRYPTION_KEY=
 ```
