@@ -29,10 +29,12 @@ type BarDatum = {
 };
 
 type BenchmarkDatum = {
+  currentValue: string;
+  gapValue: string;
   id: string;
   label: string;
-  peer: number;
-  zone: number;
+  peerMedian: string;
+  value: number;
 };
 
 type CorrelationDatum = {
@@ -57,10 +59,11 @@ type GeoDatum = {
   topFinding: string;
 };
 
-type OpportunityDriverDatum = {
+type OpportunityDatum = {
   fill: string;
   id: string;
   label: string;
+  weakMetrics: string[];
   value: number;
 };
 
@@ -141,7 +144,7 @@ export function InsightReportCharts({ report }: { report: InsightReport }) {
   const trendSeries = buildTrendSeries(findingsFor(report, "worrying_trends"));
   const benchmarkData = buildBenchmarkData(findingsFor(report, "benchmarking"));
   const correlationData = buildCorrelationData(findingsFor(report, "correlations"));
-  const opportunityData = buildOpportunityDrivers(findingsFor(report, "opportunities"));
+  const opportunityData = buildOpportunityData(findingsFor(report, "opportunities"));
 
   return (
     <div className="insight-command-center" aria-label="Executive insight charts">
@@ -155,14 +158,22 @@ export function InsightReportCharts({ report }: { report: InsightReport }) {
         </ChartCard>
 
         <ChartCard
-          title="Opportunity drivers"
-          description="Top zone's weakest metrics. Higher risk is worse."
+          title="Opportunity scores"
+          description="Top intervention candidates. Higher score is more urgent."
         >
-          <OpportunityDrivers data={opportunityData} />
+          <OpportunityScores data={opportunityData} />
         </ChartCard>
 
-        <ChartCard title="WoW anomaly impact" description="Signed change after metric direction.">
-          <HorizontalBars data={anomalyData} formatter={formatPercent} signed valueLabel="Impact" />
+        <ChartCard
+          title="WoW anomaly score"
+          description="Direction-adjusted change score. Positive is favorable."
+        >
+          <HorizontalBars
+            data={anomalyData}
+            formatter={formatSignedScore}
+            signed
+            valueLabel="Impact score"
+          />
         </ChartCard>
 
         <ChartCard
@@ -173,8 +184,11 @@ export function InsightReportCharts({ report }: { report: InsightReport }) {
           <TrendLineChart series={trendSeries} />
         </ChartCard>
 
-        <ChartCard title="Peer benchmark index" description="Same-country/type peer median = 100.">
-          <BenchmarkIndexChart data={benchmarkData} />
+        <ChartCard
+          title="Peer benchmark gaps"
+          description="Normalized underperformance versus same-country/type peers. Higher is worse."
+        >
+          <BenchmarkGapChart data={benchmarkData} />
         </ChartCard>
 
         <ChartCard
@@ -413,20 +427,7 @@ function TrendLineChart({ series }: { series: TrendSeries[] }) {
   );
 }
 
-function BenchmarkIndexChart({ data }: { data: BenchmarkDatum[] }) {
-  const config: ChartConfig = {
-    peer: {
-      color: "rgba(250,250,250,0.26)",
-      label: "Peer median",
-      valueFormatter: (value) => (typeof value === "number" ? formatIndex(value) : "n/a"),
-    },
-    zone: {
-      color: CATEGORY_COLORS.benchmarking,
-      label: "Zone index",
-      valueFormatter: (value) => (typeof value === "number" ? formatIndex(value) : "n/a"),
-    },
-  };
-
+function BenchmarkGapChart({ data }: { data: BenchmarkDatum[] }) {
   if (!data.length) {
     return <EmptyChart />;
   }
@@ -443,9 +444,9 @@ function BenchmarkIndexChart({ data }: { data: BenchmarkDatum[] }) {
           <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
           <XAxis
             axisLine={false}
-            domain={[0, 150]}
+            domain={[0, "dataMax"]}
             tick={AXIS_TICK}
-            tickFormatter={(value) => formatIndex(Number(value))}
+            tickFormatter={(value) => formatScore(Number(value))}
             tickLine={false}
             type="number"
           />
@@ -458,13 +459,50 @@ function BenchmarkIndexChart({ data }: { data: BenchmarkDatum[] }) {
             type="category"
             width={112}
           />
-          <ReferenceLine stroke={MUTED_STROKE} x={100} />
-          <Tooltip content={<ChartTooltipContent config={config} />} cursor={false} />
-          <Bar barSize={9} dataKey="peer" fill="rgba(250,250,250,0.26)" radius={[0, 4, 4, 0]} />
-          <Bar barSize={13} dataKey="zone" fill={CATEGORY_COLORS.benchmarking} radius={[0, 5, 5, 0]} />
+          <Tooltip content={<BenchmarkGapTooltip />} cursor={false} />
+          <Bar barSize={15} dataKey="value" fill={CATEGORY_COLORS.benchmarking} radius={[0, 5, 5, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </ChartContainer>
+  );
+}
+
+function BenchmarkGapTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: TooltipPayload<BenchmarkDatum>;
+}) {
+  const item = payload?.[0]?.payload;
+  if (!active || !item) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">{item.label}</div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-dot" style={{ background: CATEGORY_COLORS.benchmarking }} />
+        <span className="chart-tooltip-name">Gap score</span>
+        <span className="chart-tooltip-value">{formatScore(item.value)}</span>
+      </div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-dot" style={{ background: CATEGORY_COLORS.anomalies }} />
+        <span className="chart-tooltip-name">Zone value</span>
+        <span className="chart-tooltip-value">{item.currentValue}</span>
+      </div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-dot" style={{ background: MUTED_STROKE }} />
+        <span className="chart-tooltip-name">Peer median</span>
+        <span className="chart-tooltip-value">{item.peerMedian}</span>
+      </div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-dot" style={{ background: "rgba(250,250,250,0.42)" }} />
+        <span className="chart-tooltip-name">Gap</span>
+        <span className="chart-tooltip-value">{item.gapValue}</span>
+      </div>
+    </div>
   );
 }
 
@@ -542,12 +580,74 @@ function CorrelationTooltip({
   );
 }
 
-function OpportunityDrivers({ data }: { data: OpportunityDriverDatum[] }) {
+function OpportunityScores({ data }: { data: OpportunityDatum[] }) {
   if (!data.length) {
     return <EmptyChart />;
   }
 
-  return <HorizontalBars data={data} formatter={formatPercentUnit} valueLabel="Risk" />;
+  return (
+    <ChartContainer>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ top: 6, right: 18, bottom: 0, left: 8 }}
+        >
+          <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
+          <XAxis
+            axisLine={false}
+            domain={[0, "dataMax"]}
+            tick={AXIS_TICK}
+            tickFormatter={(value) => formatScore(Number(value))}
+            tickLine={false}
+            type="number"
+          />
+          <YAxis
+            axisLine={false}
+            dataKey="label"
+            interval={0}
+            tick={AXIS_TICK}
+            tickLine={false}
+            type="category"
+            width={112}
+          />
+          <Tooltip content={<OpportunityTooltip />} cursor={false} />
+          <Bar barSize={15} dataKey="value" fill={CATEGORY_COLORS.opportunities} radius={[0, 5, 5, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartContainer>
+  );
+}
+
+function OpportunityTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: TooltipPayload<OpportunityDatum>;
+}) {
+  const item = payload?.[0]?.payload;
+  if (!active || !item) {
+    return null;
+  }
+
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip-label">{item.label}</div>
+      <div className="chart-tooltip-row">
+        <span className="chart-tooltip-dot" style={{ background: CATEGORY_COLORS.opportunities }} />
+        <span className="chart-tooltip-name">Opportunity score</span>
+        <span className="chart-tooltip-value">{formatScore(item.value)}</span>
+      </div>
+      {item.weakMetrics.length ? (
+        <div className="chart-tooltip-row">
+          <span className="chart-tooltip-dot" style={{ background: "rgba(250,250,250,0.42)" }} />
+          <span className="chart-tooltip-name">Weak metrics</span>
+          <span className="chart-tooltip-value">{item.weakMetrics.join(", ")}</span>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function EmptyChart() {
@@ -557,6 +657,9 @@ function EmptyChart() {
 function buildGeoData(report: InsightReport): GeoDatum[] {
   const rows = new Map<string, GeoDatum>();
   for (const finding of report.categories.flatMap((category) => category.findings)) {
+    if (!isMapRiskFinding(finding)) {
+      continue;
+    }
     const code = stringEvidence(finding, "country");
     if (!code || !COUNTRY_POINTS[code]) {
       continue;
@@ -590,6 +693,19 @@ function buildGeoData(report: InsightReport): GeoDatum[] {
   }
 
   return Array.from(rows.values()).sort((a, b) => b.risk - a.risk);
+}
+
+function isMapRiskFinding(finding: Finding) {
+  if (finding.category === "anomalies") {
+    const change = numberEvidence(finding, "change_score");
+    if (change === null) {
+      return false;
+    }
+    const direction = stringEvidence(finding, "direction");
+    const impact = direction === "lower_better" ? -change : change;
+    return impact < 0;
+  }
+  return ["worrying_trends", "benchmarking", "opportunities"].includes(finding.category);
 }
 
 function locationKey(country: string, city: string) {
@@ -681,16 +797,20 @@ function buildBenchmarkData(findings: Finding[]): BenchmarkDatum[] {
     .slice(0, 5)
     .map((finding) => {
       const underperformance = numberEvidence(finding, "underperformance_score");
-      const zoneIndex =
-        underperformance === null ? null : (1 - Math.max(0, underperformance)) * 100;
-      if (zoneIndex === null || !Number.isFinite(zoneIndex)) {
+      if (underperformance === null || !Number.isFinite(underperformance)) {
         return null;
       }
+      const currentValue =
+        stringEvidence(finding, "current_value_label") || formatRawEvidence(finding, "current_value");
+      const peerMedian =
+        stringEvidence(finding, "peer_median_label") || formatRawEvidence(finding, "peer_median");
       return {
+        currentValue,
+        gapValue: formatSignedRawEvidence(finding, "gap_value"),
         id: finding.id,
         label: findingLabel(finding),
-        peer: 100,
-        zone: clamp(zoneIndex, 0, 150),
+        peerMedian,
+        value: underperformance,
       };
     })
     .filter((item): item is BenchmarkDatum => item !== null);
@@ -722,31 +842,30 @@ function buildCorrelationData(findings: Finding[]): CorrelationDatum[] {
     .filter((item): item is CorrelationDatum => item !== null);
 }
 
-function buildOpportunityDrivers(findings: Finding[]): OpportunityDriverDatum[] {
-  const weakMetrics = findings[0]?.evidence?.weak_metrics;
-  if (!Array.isArray(weakMetrics)) {
-    return [];
-  }
-
-  return weakMetrics
+function buildOpportunityData(findings: Finding[]): OpportunityDatum[] {
+  return findings
     .slice(0, 5)
-    .map((item) => {
-      if (!isRecord(item)) {
+    .map((finding) => {
+      const score = numberEvidence(finding, "opportunity_score");
+      if (score === null) {
         return null;
       }
-      const risk = toNumber(item.risk);
-      const metric = typeof item.metric === "string" ? item.metric : "";
-      if (risk === null || !metric) {
-        return null;
-      }
+      const weakMetrics = Array.isArray(finding.evidence?.weak_metrics)
+        ? finding.evidence.weak_metrics
+            .filter(isRecord)
+            .map((item) => (typeof item.metric === "string" ? item.metric : ""))
+            .filter(Boolean)
+            .slice(0, 3)
+        : [];
       return {
         fill: CATEGORY_COLORS.opportunities,
-        id: metric,
-        label: compactLabel(metric, 18),
-        value: clamp(risk, 0, 1),
+        id: finding.id,
+        label: findingLabel(finding, false),
+        value: score,
+        weakMetrics,
       };
     })
-    .filter((item): item is OpportunityDriverDatum => item !== null);
+    .filter((item): item is OpportunityDatum => item !== null);
 }
 
 function findingsFor(report: InsightReport, categoryKey: CategoryKey) {
@@ -810,7 +929,14 @@ function formatPercentUnit(value: number) {
 }
 
 function formatScore(value: number) {
+  if (Math.abs(value) >= 10) {
+    return value.toFixed(1);
+  }
   return value.toFixed(2);
+}
+
+function formatSignedScore(value: number) {
+  return `${value > 0 ? "+" : ""}${formatScore(value)}`;
 }
 
 function formatIndex(value: number) {
@@ -819,4 +945,21 @@ function formatIndex(value: number) {
 
 function formatCorrelation(value: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function formatRawEvidence(finding: Finding, key: string) {
+  const value = numberEvidence(finding, key);
+  if (value === null) {
+    return "n/a";
+  }
+  return Math.abs(value) >= 10 ? value.toFixed(2) : value.toFixed(3);
+}
+
+function formatSignedRawEvidence(finding: Finding, key: string) {
+  const value = numberEvidence(finding, key);
+  if (value === null) {
+    return "n/a";
+  }
+  const formatted = Math.abs(value) >= 10 ? value.toFixed(2) : value.toFixed(3);
+  return `${value > 0 ? "+" : ""}${formatted}`;
 }

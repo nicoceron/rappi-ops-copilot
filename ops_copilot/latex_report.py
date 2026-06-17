@@ -184,7 +184,7 @@ def render_query_result_latex(result: Any) -> str:
         getattr(result, "suggested_followups", []) or [],
         "No follow-up suggestions were provided.",
     )
-    metadata = _query_metadata(result, row_count)
+    metadata = _query_metadata(result, row_count, rows, all_columns)
     question = str(getattr(result, "question", "") or "").strip()
     sql = str(getattr(result, "sql", "") or "").strip()
     question_block = (
@@ -562,13 +562,10 @@ def _truncate_context(value: str, max_length: int) -> str:
     return value[:max_length] + "\n[truncated]"
 
 
-def _query_metadata(result: Any, row_count: int) -> str:
+def _query_metadata(result: Any, row_count: int, rows: list[Any], columns: list[str]) -> str:
     answer_type = str(getattr(result, "answer_type", "model_sql") or "model_sql")
     period_label = str(getattr(result, "period_label", "Model-generated SQL result") or "")
-    chart_hint = str(getattr(result, "visualization_hint", "") or "")
-    chart = getattr(result, "chart", None)
-    if not chart_hint and chart is not None:
-        chart_hint = str(getattr(chart, "type", "") or "")
+    chart_hint = _resolved_query_chart_hint(result, rows, columns)
     filters = getattr(result, "filters_applied", None)
     if isinstance(filters, dict) and filters:
         filter_text = "; ".join(
@@ -674,14 +671,24 @@ def _query_result_chart(result: Any, rows: list[Any], columns: list[str]) -> str
     if not rows or not columns:
         return ""
 
-    hint = _query_chart_hint(result)
+    hint = _resolved_query_chart_hint(result, rows, columns)
+    chart = getattr(result, "chart", None)
+    preferred_x = _valid_chart_column(getattr(chart, "x", None), columns)
+    preferred_y = _valid_chart_column(getattr(chart, "y", None), columns)
+    preferred_series = _valid_chart_column(getattr(chart, "series", None), columns)
     if hint == "none" or hint == "table":
         return ""
     if hint == "line":
-        return _query_line_chart(rows, columns)
+        return _query_line_chart(
+            rows,
+            columns,
+            preferred_x=preferred_x,
+            preferred_y=preferred_y,
+            preferred_series=preferred_series,
+        )
     if hint == "scatter":
-        return _query_scatter_chart(rows, columns)
-    return _query_bar_chart(rows, columns)
+        return _query_scatter_chart(rows, columns, preferred_x=preferred_x, preferred_y=preferred_y)
+    return _query_bar_chart(rows, columns, preferred_x=preferred_x, preferred_y=preferred_y)
 
 
 def _query_chart_hint(result: Any) -> str:
@@ -692,6 +699,25 @@ def _query_chart_hint(result: Any) -> str:
     if chart is not None:
         return _normalize_query_chart_hint(str(getattr(chart, "type", "") or "").strip().lower())
     return ""
+
+
+def _resolved_query_chart_hint(result: Any, rows: list[Any], columns: list[str]) -> str:
+    hint = _query_chart_hint(result)
+    if hint in {"none", "table"}:
+        return hint
+    if not rows or not columns:
+        return "table"
+    if _is_small_segment_comparison(rows, columns):
+        return "bar"
+    if hint == "line":
+        return "line" if _has_time_column(columns) and _primary_numeric_columns(rows, columns) else "table"
+    if hint == "scatter":
+        if _has_scatter_shape(rows, columns):
+            return "scatter"
+        return "bar" if _has_bar_shape(rows, columns) else "table"
+    if hint == "bar":
+        return "bar" if _has_bar_shape(rows, columns) else "table"
+    return "table"
 
 
 def _normalize_query_chart_hint(value: str) -> str:
@@ -706,15 +732,64 @@ def _normalize_query_chart_hint(value: str) -> str:
     return "table"
 
 
-def _query_line_chart(rows: list[Any], columns: list[str]) -> str:
-    x_col = _preferred_x_column(columns, ["week_label", "week", "semana", "date", "fecha"])
+def _valid_chart_column(value: Any, columns: list[str]) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return value if value in columns else None
+
+
+def _has_time_column(columns: list[str]) -> bool:
+    return any(re.search(r"week|semana|date|fecha", column, re.IGNORECASE) for column in columns)
+
+
+def _has_bar_shape(rows: list[Any], columns: list[str]) -> bool:
+    return _preferred_category_column(rows, columns) is not None and bool(
+        _primary_numeric_columns(rows, columns)
+    )
+
+
+def _has_scatter_shape(rows: list[Any], columns: list[str]) -> bool:
+    numeric = _numeric_columns(rows, columns)
+    primary = [
+        column
+        for column in numeric
+        if not _is_count_column(column) and not _is_minmax_column(column)
+    ]
+    count_like = [column for column in numeric if _is_count_column(column)]
+    return len(primary) >= 2 or (len(rows) > 2 and bool(primary) and bool(count_like))
+
+
+def _is_small_segment_comparison(rows: list[Any], columns: list[str]) -> bool:
+    return len(rows) <= 6 and any(
+        re.search(r"zone_type|segment|tipo|wealthy", column, re.IGNORECASE)
+        for column in columns
+    )
+
+
+def _primary_numeric_columns(rows: list[Any], columns: list[str]) -> list[str]:
+    return [
+        column
+        for column in _numeric_columns(rows, columns)
+        if not _is_count_column(column) and not _is_minmax_column(column)
+    ]
+
+
+def _query_line_chart(
+    rows: list[Any],
+    columns: list[str],
+    *,
+    preferred_x: str | None = None,
+    preferred_y: str | None = None,
+    preferred_series: str | None = None,
+) -> str:
+    x_col = preferred_x or _preferred_x_column(columns, ["week_label", "week", "semana", "date", "fecha"])
     if x_col is None and "week_offset" in columns:
         x_col = "week_offset"
     if x_col is None:
-        return _query_bar_chart(rows, columns)
+        return ""
 
-    series_col = _preferred_series_column(columns, exclude={x_col})
-    y_col = _preferred_y_column(rows, columns, exclude={x_col, series_col or "", "week_offset"})
+    series_col = preferred_series or _preferred_series_column(columns, exclude={x_col})
+    y_col = preferred_y or _preferred_y_column(rows, columns, exclude={x_col, series_col or "", "week_offset"})
     if y_col is None:
         return ""
 
@@ -790,9 +865,15 @@ def _query_line_chart(rows: list[Any], columns: list[str]) -> str:
 """
 
 
-def _query_bar_chart(rows: list[Any], columns: list[str]) -> str:
-    category_col = _preferred_category_column(rows, columns)
-    y_col = _preferred_y_column(rows, columns, exclude={category_col or ""})
+def _query_bar_chart(
+    rows: list[Any],
+    columns: list[str],
+    *,
+    preferred_x: str | None = None,
+    preferred_y: str | None = None,
+) -> str:
+    category_col = preferred_x or _preferred_category_column(rows, columns)
+    y_col = preferred_y or _preferred_y_column(rows, columns, exclude={category_col or ""})
     if category_col is None or y_col is None:
         return ""
 
@@ -823,28 +904,36 @@ def _query_bar_chart(rows: list[Any], columns: list[str]) -> str:
     )
 
 
-def _query_scatter_chart(rows: list[Any], columns: list[str]) -> str:
+def _query_scatter_chart(
+    rows: list[Any],
+    columns: list[str],
+    *,
+    preferred_x: str | None = None,
+    preferred_y: str | None = None,
+) -> str:
     numeric = [
         column
         for column in _numeric_columns(rows, columns)
         if not _is_minmax_column(column) and "offset" not in column.lower()
     ]
     if len(numeric) < 2:
-        return _query_bar_chart(rows, columns)
+        return ""
 
-    x_col = next((column for column in numeric if _is_count_column(column)), numeric[0])
-    y_col = next(
-        (
-            column
-            for column in numeric
-            if column != x_col and not _is_count_column(column) and not _is_minmax_column(column)
-        ),
-        None,
-    )
+    x_col = preferred_x if preferred_x in numeric else next((column for column in numeric if _is_count_column(column)), numeric[0])
+    y_col = preferred_y if preferred_y in numeric and preferred_y != x_col else None
+    if y_col is None:
+        y_col = next(
+            (
+                column
+                for column in numeric
+                if column != x_col and not _is_count_column(column) and not _is_minmax_column(column)
+            ),
+            None,
+        )
     if y_col is None:
         y_col = next((column for column in numeric if column != x_col), None)
     if y_col is None:
-        return _query_bar_chart(rows, columns)
+        return ""
 
     label_col = _preferred_category_column(rows, columns)
 
@@ -936,9 +1025,26 @@ def _preferred_y_column(
         and "offset" not in column.lower()
     ]
     if candidates:
-        return candidates[0]
+        return sorted(candidates, key=_y_column_priority)[0]
     fallback = [column for column in numeric if column not in exclude]
-    return fallback[0] if fallback else None
+    return sorted(fallback, key=_y_column_priority)[0] if fallback else None
+
+
+def _y_column_priority(column: str) -> tuple[int, int]:
+    lowered = column.lower()
+    if "problem_score" in lowered or lowered.endswith("_score"):
+        return (0, len(column))
+    if "pct_change" in lowered or "percent_change" in lowered or "growth_rate" in lowered:
+        return (1, len(column))
+    if "absolute_change" in lowered or lowered.endswith("_change"):
+        return (2, len(column))
+    if lowered == "value" or lowered.startswith(("avg_", "average_", "mean_")):
+        return (3, len(column))
+    if any(token in lowered for token in ["penetration", "perfect", "gross_profit", "rate"]):
+        return (4, len(column))
+    if lowered.endswith("_current"):
+        return (5, len(column))
+    return (10, len(column))
 
 
 def _numeric_columns(rows: list[Any], columns: list[str]) -> list[str]:
@@ -996,7 +1102,12 @@ def _chart_title(kind: str, y_col: str, x_col: str) -> str:
 
 def _is_count_column(column: str) -> bool:
     lowered = column.lower()
-    return lowered in {"n", "count", "zones", "zonas", "n_zones"} or lowered.startswith("n_")
+    return (
+        lowered in {"n", "count", "zones", "zonas", "n_zones", "orders", "start_orders", "end_orders"}
+        or lowered.startswith(("n_", "num_"))
+        or lowered.endswith(("_count", "_orders"))
+        or "count" in lowered
+    )
 
 
 def _is_minmax_column(column: str) -> bool:
@@ -1148,7 +1259,7 @@ def _compact_evidence(finding: InsightFinding) -> str:
         if value:
             fragments.append(str(value))
     if "change_score" in evidence:
-        fragments.append(f"WoW impact {_format_pct(evidence.get('change_score'))}")
+        fragments.append(f"WoW score {_format_signed_score(evidence.get('change_score'))}")
     if "underperformance_score" in evidence:
         fragments.append(
             f"peer gap score {_format_number(evidence.get('underperformance_score'), 2)}"
@@ -1168,16 +1279,16 @@ def _anomaly_chart(findings: list[InsightFinding]) -> str:
             continue
         direction = str(finding.evidence.get("direction") or "")
         impact = -change if direction == "lower_better" else change
-        points.append((_short_label(finding), impact * 100))
+        points.append((_short_label(finding), impact))
     if not points:
         return ""
 
-    limit = max(12.0, max(abs(value) for _, value in points) * 1.18)
+    limit = max(1.0, max(abs(value) for _, value in points) * 1.18)
     positive = [(label, value) for label, value in points if value >= 0]
     negative = [(label, value) for label, value in points if value < 0]
     return _xbar_chart(
-        title="WoW anomaly impact",
-        xlabel="Directional week-over-week impact (positive is better)",
+        title="WoW anomaly score",
+        xlabel="Direction-adjusted change score (positive is favorable)",
         points=points,
         series=[
             ("Improvements", "rappiGreen", positive),
@@ -1324,29 +1435,23 @@ Metric pair & Correlation & Low-low zones \\
 def _opportunity_chart(findings: list[InsightFinding]) -> str:
     if not findings:
         return ""
-    weak_metrics = findings[0].evidence.get("weak_metrics")
-    if not isinstance(weak_metrics, list):
-        return ""
 
     points = []
-    for item in weak_metrics[:5]:
-        if not isinstance(item, dict):
-            continue
-        risk = _to_float(item.get("risk"))
-        metric = str(item.get("metric") or "")
-        if risk is not None and metric:
-            points.append((_truncate(metric, 35), risk * 100))
+    for finding in findings[:5]:
+        score = _to_float(finding.evidence.get("opportunity_score"))
+        if score is not None:
+            points.append((_short_label(finding, max_length=38), score))
     if not points:
         return ""
 
-    zone_label = _truncate(str(findings[0].evidence.get("zone") or findings[0].title), 40)
+    upper = max(1.0, max(value for _, value in points) * 1.18)
     return _xbar_chart(
-        title=f"Opportunity drivers: {zone_label}",
-        xlabel="Metric risk percentile (higher is worse)",
+        title="Opportunity scores",
+        xlabel="Composite intervention score (higher is more urgent)",
         points=points,
-        series=[("Risk", "rappiOrange", points)],
+        series=[("Opportunity score", "rappiOrange", points)],
         xmin=0,
-        xmax=100,
+        xmax=upper,
     )
 
 
@@ -1459,6 +1564,13 @@ def _format_pct(value: Any) -> str:
     if number is None:
         return "n/a"
     return f"{number * 100:+.1f}%"
+
+
+def _format_signed_score(value: Any) -> str:
+    number = _to_float(value)
+    if number is None:
+        return "n/a"
+    return f"{number:+.2f}" if abs(number) < 10 else f"{number:+.1f}"
 
 
 def _format_number(value: Any, digits: int) -> str:

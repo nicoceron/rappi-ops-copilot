@@ -728,17 +728,22 @@ function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | n
   }
 
   const headers = table.headers.filter((header) => header !== "#");
+  const isSegmentComparison = isSmallSegmentComparisonTable(table, headers);
 
-  if (requestedType === "scatter") {
+  if (requestedType === "scatter" && !isSegmentComparison) {
     return scatterChartFromTable(table, headers);
   }
 
+  const timeKey = selectTimeKey(headers);
+  if ((requestedType === "line" || timeKey) && timeKey) {
+    return lineChartFromTable(table, headers, timeKey);
+  }
+
   const xKey = selectCategoryKey(headers, table.rows);
-  const yKeys = headers
-    .filter((header) => header !== xKey)
-    .filter((header) => table.rows.some((row) => parseMetricValue(row[header]) !== null))
-    .filter((header) => !/variaci[oó]n|mín|max|zonas|orders total|total órdenes/i.test(header))
-    .slice(0, 2);
+  const yKeys = selectPrimaryMetricKeys(headers, table.rows, xKey).slice(
+    0,
+    isSegmentComparison ? 1 : 2,
+  );
 
   if (!xKey || yKeys.length === 0) {
     return null;
@@ -776,6 +781,81 @@ function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | n
   };
 }
 
+function lineChartFromTable(table: ParsedTable, headers: string[], xKey: string): ChartSpec | null {
+  const yKey = selectPrimaryMetricKeys(headers, table.rows, xKey)[0];
+  if (!yKey) {
+    return null;
+  }
+
+  const seriesKey = selectSeriesKey(headers, xKey, yKey);
+  if (!seriesKey) {
+    const data = table.rows
+      .map((row) => {
+        const value = parseMetricValue(row[yKey]);
+        if (value === null) {
+          return null;
+        }
+
+        return {
+          [xKey]: stripMarkdown(row[xKey] || ""),
+          [yKey]: value,
+        };
+      })
+      .filter((row): row is Record<string, string | number> => Boolean(row));
+
+    if (data.length < 2) {
+      return null;
+    }
+
+    return {
+      id: createId("chart"),
+      type: "line",
+      title: `Trend: ${yKey}`,
+      xKey,
+      yKeys: [yKey],
+      data: sortLineData(data, xKey),
+    };
+  }
+
+  const xLabels = orderedLabels(table.rows.map((row) => stripMarkdown(row[xKey] || "")));
+  const seriesLabels = orderedLabels(table.rows.map((row) => stripMarkdown(row[seriesKey] || ""))).slice(0, 10);
+  const pointsByX = new Map<string, Record<string, string | number>>();
+  xLabels.forEach((label) => {
+    pointsByX.set(label, { [xKey]: label });
+  });
+
+  table.rows.forEach((row) => {
+    const xLabel = stripMarkdown(row[xKey] || "");
+    const seriesLabel = stripMarkdown(row[seriesKey] || "");
+    const value = parseMetricValue(row[yKey]);
+    if (!xLabel || !seriesLabel || value === null || !seriesLabels.includes(seriesLabel)) {
+      return;
+    }
+
+    const point = pointsByX.get(xLabel);
+    if (point) {
+      point[seriesLabel] = value;
+    }
+  });
+
+  const data = Array.from(pointsByX.values()).filter((point) =>
+    seriesLabels.some((seriesLabel) => typeof point[seriesLabel] === "number"),
+  );
+
+  if (data.length < 2 || seriesLabels.length === 0) {
+    return null;
+  }
+
+  return {
+    id: createId("chart"),
+    type: "line",
+    title: `Trend: ${yKey} by ${seriesKey}`,
+    xKey,
+    yKeys: seriesLabels,
+    data,
+  };
+}
+
 function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec | null {
   const numericKeys = headers.filter((header) =>
     table.rows.some((row) => parseMetricValue(row[header]) !== null),
@@ -787,7 +867,7 @@ function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec
 
   const xKey = numericKeys.find(isCountLikeKey) ?? numericKeys[0];
   const yKey =
-    numericKeys.find((key) => key !== xKey && !isCountLikeKey(key) && !isMinMaxLikeKey(key)) ??
+    selectPrimaryMetricKeys(numericKeys, table.rows, xKey)[0] ??
     numericKeys.find((key) => key !== xKey);
 
   if (!yKey) {
@@ -837,6 +917,72 @@ function selectCategoryKey(headers: string[], rows: Record<string, string>[]): s
   }
 
   return headers.find((header) => rows.some((row) => parseMetricValue(row[header]) === null)) || headers[0];
+}
+
+function selectTimeKey(headers: string[]): string | null {
+  return headers.find((header) => /week_label|semana|week|fecha|date/i.test(header)) ?? null;
+}
+
+function selectSeriesKey(headers: string[], xKey: string, yKey: string): string | null {
+  const candidates = headers.filter((header) => header !== xKey && header !== yKey);
+  for (const pattern of [/^zone$/i, /zona/i, /zone_type/i, /city|ciudad/i, /country|pa[ií]s/i, /segment/i, /metric|m[eé]trica/i]) {
+    const match = candidates.find((header) => pattern.test(header));
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function selectPrimaryMetricKeys(
+  headers: string[],
+  rows: Record<string, string>[],
+  xKey: string,
+): string[] {
+  return headers
+    .filter((header) => header !== xKey)
+    .filter((header) => rows.some((row) => parseMetricValue(row[header]) !== null))
+    .filter((header) => !isCountLikeKey(header) && !isMinMaxLikeKey(header))
+    .filter((header) => !/variaci[oó]n|orders total|total órdenes/i.test(header))
+    .sort((left, right) => metricColumnPriority(left) - metricColumnPriority(right));
+}
+
+function metricColumnPriority(key: string): number {
+  const normalized = key.toLowerCase();
+  if (/^(avg|average|promedio|mean)_/.test(normalized) || normalized === "value") {
+    return 0;
+  }
+  if (/penetration|perfect|gross_profit|profit|order|rate|pct|percent/.test(normalized)) {
+    return 1;
+  }
+  return 2;
+}
+
+function isSmallSegmentComparisonTable(table: ParsedTable, headers: string[]): boolean {
+  if (table.rows.length > 6) {
+    return false;
+  }
+
+  return headers.some((header) => /zone_type|segment|tipo|wealthy/i.test(header));
+}
+
+function orderedLabels(values: string[]): string[] {
+  const labels = values.filter(Boolean);
+  const unique = Array.from(new Set(labels));
+  if (unique.every((label) => /^L\d+W$/i.test(label))) {
+    return unique.sort((left, right) => Number(right.slice(1, -1)) - Number(left.slice(1, -1)));
+  }
+  return unique;
+}
+
+function sortLineData(data: Record<string, string | number>[], xKey: string) {
+  const labels = orderedLabels(data.map((row) => String(row[xKey] ?? "")));
+  const order = new Map(labels.map((label, index) => [label, index]));
+  return [...data].sort(
+    (left, right) =>
+      (order.get(String(left[xKey] ?? "")) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(String(right[xKey] ?? "")) ?? Number.MAX_SAFE_INTEGER),
+  );
 }
 
 function normalizeTables(value: unknown): ParsedTable[] {
