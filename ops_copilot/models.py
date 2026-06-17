@@ -120,9 +120,13 @@ class SemanticQuery(BaseModel):
 class ChartSpec(BaseModel):
     recommended: bool
     type: ChartType
+    title: str | None = None
     x: str | None = None
     y: str | None = None
     series: str | None = None
+    xKey: str | None = None
+    yKeys: list[str] = Field(default_factory=list)
+    data: list[dict[str, Any]] = Field(default_factory=list)
     chartjs: dict[str, Any] | None = None
 
 

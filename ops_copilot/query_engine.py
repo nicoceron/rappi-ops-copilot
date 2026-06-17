@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 
+from ops_copilot.charting import build_chart_spec
 from ops_copilot.data_loader import (
     DIMENSION_COLUMNS,
     OperationalDataset,
@@ -691,17 +692,12 @@ class QueryEngine:
         y: str | None = None,
         series: str | None = None,
     ) -> ChartSpec:
-        if chart_type in {"none", "table"} or not rows:
-            return ChartSpec(recommended=False, type="table")
+        chart = build_chart_spec(rows, chart_type, x=x, y=y, series=series)
+        if not chart.recommended:
+            return chart
         chartjs = self._chartjs(rows, chart_type, x, y, series)
-        return ChartSpec(
-            recommended=True,
-            type=chart_type,  # type: ignore[arg-type]
-            x=x,
-            y=y,
-            series=series,
-            chartjs=chartjs,
-        )
+        chart.chartjs = chartjs
+        return chart
 
     def _chartjs(
         self,

@@ -211,6 +211,7 @@ def render_query_result_latex(result: Any) -> str:
 \usepackage{{tabularx}}
 \usepackage{{array}}
 \usepackage{{enumitem}}
+\usepackage{{float}}
 \usepackage{{fancyhdr}}
 \usepackage{{hyperref}}
 \usepackage{{tikz}}
@@ -285,6 +286,7 @@ def query_result_latex_context(result: Any) -> str:
         "columns": _query_result_columns(result, rows),
         "row_count": getattr(result, "row_count", len(rows)),
         "truncated": getattr(result, "truncated", False),
+        "chart": _chart_payload(getattr(result, "chart", None)),
         "caveats": getattr(result, "caveats", []),
         "sample_rows": rows[:10],
     }
@@ -668,6 +670,10 @@ def _query_result_table(rows: list[Any], columns: list[str]) -> str:
 
 
 def _query_result_chart(result: Any, rows: list[Any], columns: list[str]) -> str:
+    chart_from_payload = _query_chart_from_payload(getattr(result, "chart", None))
+    if chart_from_payload:
+        return chart_from_payload
+
     if not rows or not columns:
         return ""
 
@@ -689,6 +695,271 @@ def _query_result_chart(result: Any, rows: list[Any], columns: list[str]) -> str
     if hint == "scatter":
         return _query_scatter_chart(rows, columns, preferred_x=preferred_x, preferred_y=preferred_y)
     return _query_bar_chart(rows, columns, preferred_x=preferred_x, preferred_y=preferred_y)
+
+
+def _query_chart_from_payload(chart: Any) -> str:
+    payload = _chart_payload(chart)
+    if not payload:
+        return ""
+
+    chart_type = _normalize_query_chart_hint(str(payload.get("type") or ""))
+    if chart_type in {"none", "table"}:
+        return ""
+
+    x_key = _payload_string(payload.get("xKey")) or _payload_string(payload.get("x"))
+    y_keys = _payload_y_keys(payload)
+    data = [row for row in payload.get("data", []) if isinstance(row, dict)]
+    title = _payload_string(payload.get("title"))
+    if not x_key or not y_keys or not data:
+        return ""
+
+    if chart_type == "line":
+        return _query_line_chart_from_payload(
+            data,
+            x_key=x_key,
+            y_keys=y_keys,
+            title=title,
+        )
+    if chart_type == "scatter":
+        return _query_scatter_chart_from_payload(
+            data,
+            x_key=x_key,
+            y_key=y_keys[0],
+            title=title,
+        )
+    return _query_bar_chart_from_payload(
+        data,
+        x_key=x_key,
+        y_keys=y_keys,
+        title=title,
+    )
+
+
+def _chart_payload(chart: Any) -> dict[str, Any]:
+    if chart is None:
+        return {}
+    if isinstance(chart, dict):
+        return chart
+    if hasattr(chart, "model_dump"):
+        dumped = chart.model_dump(mode="json")
+        return dumped if isinstance(dumped, dict) else {}
+    payload: dict[str, Any] = {}
+    for key in ["type", "title", "x", "y", "series", "xKey", "yKeys", "data"]:
+        if hasattr(chart, key):
+            payload[key] = getattr(chart, key)
+    return payload
+
+
+def _payload_string(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _payload_y_keys(payload: dict[str, Any]) -> list[str]:
+    raw_y_keys = payload.get("yKeys")
+    if isinstance(raw_y_keys, list):
+        y_keys = [item.strip() for item in raw_y_keys if isinstance(item, str) and item.strip()]
+        if y_keys:
+            return y_keys
+    y_key = _payload_string(payload.get("y"))
+    return [y_key] if y_key else []
+
+
+def _query_bar_chart_from_payload(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_keys: list[str],
+    title: str | None,
+) -> str:
+    x_labels = [_chart_label(row.get(x_key)) for row in data]
+    x_labels = [label for label in x_labels if label]
+    if not x_labels:
+        return ""
+
+    plots = []
+    colors = ["rappiOrange", "rappiBlue", "rappiGreen", "rappiPurple"]
+    for index, y_key in enumerate(y_keys):
+        coords = []
+        for point_index, row in enumerate(data):
+            value = _to_float(row.get(y_key))
+            label = _chart_label(row.get(x_key))
+            if value is None or not label:
+                continue
+            coords.append(f"({point_index},{value:.6g})")
+        if coords:
+            color = colors[index % len(colors)]
+            plots.append(
+                f"\\addplot+[ybar, fill={color}, draw={color}] coordinates "
+                f"{{{' '.join(coords)}}};\n"
+                f"\\addlegendentry{{{_latex_escape(_truncate(y_key, 28))}}}"
+            )
+    if not plots:
+        return ""
+
+    xticks, xticklabels, tick_style = _payload_tick_options(data, x_key)
+    bar_width = _payload_bar_width(len(data))
+    ylabel = _axis_title(y_keys[0]) if len(y_keys) == 1 else "Value"
+    legend = (
+        "legend style={font=\\scriptsize, at={(1.02,1)}, anchor=north west},"
+        if len(y_keys) > 1
+        else "legend style={draw=none},"
+    )
+    caption = title or _chart_title("Bar chart", y_keys[0], x_key)
+    return rf"""\begin{{figure}}[H]
+\centering
+\begin{{tikzpicture}}
+\begin{{axis}}[
+  width=0.95\linewidth,
+  height=6.7cm,
+  ybar,
+  bar width={bar_width:.2f}pt,
+  xlabel={{{_latex_escape(_axis_title(x_key))}}},
+  ylabel={{{_latex_escape(ylabel)}}},
+  xtick={{{xticks}}},
+  xticklabels={{{xticklabels}}},
+  xticklabel style={{{tick_style}}},
+  ymajorgrids=true,
+  grid style={{draw=rappiLine}},
+  {legend}
+]
+{chr(10).join(plots)}
+\end{{axis}}
+\end{{tikzpicture}}
+\caption{{{_latex_escape(caption)}}}
+\end{{figure}}
+"""
+
+
+def _query_line_chart_from_payload(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_keys: list[str],
+    title: str | None,
+) -> str:
+    if len(data) < 2:
+        return ""
+
+    plots = []
+    colors = ["rappiBlue", "rappiOrange", "rappiGreen", "rappiPurple", "rappiRed", "rappiMuted"]
+    for index, y_key in enumerate(y_keys):
+        coords = []
+        for point_index, row in enumerate(data):
+            value = _to_float(row.get(y_key))
+            if value is not None:
+                coords.append(f"({point_index},{value:.6g})")
+        if len(coords) >= 2:
+            color = colors[index % len(colors)]
+            plots.append(
+                f"\\addplot+[mark=*, thick, color={color}] coordinates "
+                f"{{{' '.join(coords)}}};\n"
+                f"\\addlegendentry{{{_latex_escape(_truncate(y_key, 28))}}}"
+            )
+    if not plots:
+        return ""
+
+    xticks, xticklabels, tick_style = _payload_tick_options(data, x_key)
+    ylabel = _axis_title(y_keys[0]) if len(y_keys) == 1 else "Value"
+    legend = (
+        "legend style={font=\\scriptsize, at={(1.02,1)}, anchor=north west},"
+        if len(y_keys) > 1
+        else "legend style={draw=none},"
+    )
+    caption = title or _chart_title("Line chart", y_keys[0], x_key)
+    return rf"""\begin{{figure}}[H]
+\centering
+\begin{{tikzpicture}}
+\begin{{axis}}[
+  width=0.95\linewidth,
+  height=6.7cm,
+  xlabel={{{_latex_escape(_axis_title(x_key))}}},
+  ylabel={{{_latex_escape(ylabel)}}},
+  xtick={{{xticks}}},
+  xticklabels={{{xticklabels}}},
+  xticklabel style={{{tick_style}}},
+  ymajorgrids=true,
+  grid style={{draw=rappiLine}},
+  {legend}
+]
+{chr(10).join(plots)}
+\end{{axis}}
+\end{{tikzpicture}}
+\caption{{{_latex_escape(caption)}}}
+\end{{figure}}
+"""
+
+
+def _payload_tick_options(data: list[dict[str, Any]], x_key: str) -> tuple[str, str, str]:
+    count = len(data)
+    if count <= 18:
+        step = 1
+        max_label = 24
+        tick_style = r"font=\scriptsize, rotate=35, anchor=east"
+    elif count <= 40:
+        step = 2
+        max_label = 20
+        tick_style = r"font=\tiny, rotate=55, anchor=east"
+    else:
+        step = max(1, math.ceil(count / 24))
+        max_label = 18
+        tick_style = r"font=\tiny, rotate=60, anchor=east"
+
+    tick_indexes = list(range(0, count, step))
+    if count and tick_indexes[-1] != count - 1:
+        tick_indexes.append(count - 1)
+
+    xticks = ",".join(str(index) for index in tick_indexes)
+    xticklabels = ",".join(
+        f"{{{_latex_escape(_truncate(_chart_label(data[index].get(x_key)), max_label))}}}"
+        for index in tick_indexes
+    )
+    return xticks, xticklabels, tick_style
+
+
+def _payload_bar_width(point_count: int) -> float:
+    if point_count <= 0:
+        return 7.0
+    return max(1.2, min(7.0, 95.0 / point_count))
+
+
+def _query_scatter_chart_from_payload(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_key: str,
+    title: str | None,
+) -> str:
+    coords = []
+    for row in data:
+        x_value = _to_float(row.get(x_key))
+        y_value = _to_float(row.get(y_key))
+        if x_value is not None and y_value is not None:
+            coords.append(f"({x_value:.6g},{y_value:.6g})")
+    if len(coords) < 2:
+        return ""
+
+    caption = title or _chart_title("Scatter chart", y_key, x_key)
+    return rf"""\begin{{figure}}[H]
+\centering
+\begin{{tikzpicture}}
+\begin{{axis}}[
+  width=0.9\linewidth,
+  height=6.5cm,
+  xlabel={{{_latex_escape(_axis_title(x_key))}}},
+  ylabel={{{_latex_escape(_axis_title(y_key))}}},
+  xmajorgrids=true,
+  ymajorgrids=true,
+  grid style={{draw=rappiLine}},
+]
+\addplot+[only marks, mark=*, mark size=3pt, color=rappiPurple] coordinates {{{' '.join(coords)}}};
+\end{{axis}}
+\end{{tikzpicture}}
+\caption{{{_latex_escape(caption)}}}
+\end{{figure}}
+"""
 
 
 def _query_chart_hint(result: Any) -> str:

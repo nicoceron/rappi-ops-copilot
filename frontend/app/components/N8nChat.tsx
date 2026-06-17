@@ -602,7 +602,7 @@ function parseStructuredContent(text: string, payload: unknown): StructuredConte
   const payloadObject = isRecord(payload) ? payload : null;
   const jsonText = tryParseJson(text);
   const fencedJson = extractFencedJson(text);
-  const candidates = [payloadObject, jsonText, fencedJson].filter(isRecord);
+  const candidates = [jsonText, fencedJson, payloadObject].filter(isRecord);
 
   for (const candidate of candidates) {
     const normalized = normalizeStructuredCandidate(candidate);
@@ -616,7 +616,7 @@ function parseStructuredContent(text: string, payload: unknown): StructuredConte
 
 function normalizeStructuredCandidate(candidate: Record<string, unknown>): StructuredContent | null {
   const answer = firstString(candidate.answer, candidate.summary, candidate.output, candidate.text);
-  const tables = normalizeTables(candidate.table ?? candidate.tables);
+  const tables = normalizeTables(candidate.table ?? candidate.tables ?? candidate.rows);
   const charts = normalizeCharts(candidate.chart ?? candidate.charts);
   const exports = normalizeExports(candidate.exports ?? candidate.exportLinks ?? candidate.files);
 
@@ -651,7 +651,7 @@ function buildMessagePresentation(message: ChatMessage) {
   return {
     text,
     tables,
-    charts: [...structuredCharts, ...heuristicCharts],
+    charts: structuredCharts.length > 0 ? structuredCharts : heuristicCharts,
     exports: dedupeExports(exports),
   };
 }
@@ -995,6 +995,10 @@ function normalizeTables(value: unknown): ParsedTable[] {
 
     if (isRecord(item)) {
       const rows = item.rows ?? item.data;
+      const headers = item.headers ?? item.header ?? item.columns;
+      if (Array.isArray(headers) && Array.isArray(rows)) {
+        return tableFromMatrix(headers, rows, `structured-table-${index}`);
+      }
       if (Array.isArray(rows)) {
         return tableFromRows(rows, `structured-table-${index}`);
       }
@@ -1002,6 +1006,31 @@ function normalizeTables(value: unknown): ParsedTable[] {
 
     return [];
   });
+}
+
+function tableFromMatrix(headersInput: unknown[], rows: unknown[], id: string): ParsedTable[] {
+  const headers = headersInput.map((header) => String(header ?? "")).filter(Boolean);
+  if (headers.length === 0 || rows.length === 0) {
+    return [];
+  }
+
+  const normalizedRows = rows
+    .map((row) => {
+      if (Array.isArray(row)) {
+        return Object.fromEntries(
+          headers.map((header, cellIndex) => [header, String(row[cellIndex] ?? "")]),
+        );
+      }
+
+      if (isRecord(row)) {
+        return Object.fromEntries(headers.map((header) => [header, String(row[header] ?? "")]));
+      }
+
+      return null;
+    })
+    .filter((row): row is Record<string, string> => Boolean(row));
+
+  return normalizedRows.length > 0 ? [{ id, headers, rows: normalizedRows }] : [];
 }
 
 function tableFromRows(rows: unknown[], id: string): ParsedTable[] {
