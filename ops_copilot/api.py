@@ -378,14 +378,36 @@ def _parse_export_formats(value: str) -> list[ExportFormat]:
 
 
 def _normalize_visualization_hint(value: str) -> str:
-    text = value.strip().lower()
+    text = re.sub(r"[\s-]+", "_", value.strip().lower())
     if text in {"none", "table", "bar", "line", "scatter"}:
         return text
-    if text in {"column", "columns", "pie", "donut", "histogram"}:
+    if text in {
+        "bar_chart",
+        "column",
+        "columns",
+        "column_chart",
+        "grouped_bar",
+        "stacked_bar",
+        "horizontal_bar",
+        "pie",
+        "pie_chart",
+        "donut",
+        "doughnut",
+        "donut_chart",
+        "doughnut_chart",
+        "histogram",
+        "histograma",
+        "distribution",
+        "combo",
+        "combined",
+        "composed",
+        "mixed",
+        "dual_axis",
+    }:
         return "bar"
-    if text in {"trend", "timeseries", "time_series", "area"}:
+    if text in {"line_chart", "trend", "timeseries", "time_series", "area", "area_chart", "stacked_area"}:
         return "line"
-    if text in {"bubble"}:
+    if text in {"scatterplot", "scatter_plot", "bubble", "bubble_chart"}:
         return "scatter"
     return "table"
 
@@ -399,7 +421,7 @@ def _resolve_visualization_hint(value: str, rows: list[dict[str, Any]], columns:
     if _is_small_segment_comparison(rows, columns):
         return "bar"
     if hint == "line":
-        return "line" if _has_time_column(columns) and _primary_numeric_columns(rows, columns) else "table"
+        return "line" if _has_time_column(columns) and _plottable_numeric_columns(rows, columns) else "table"
     if hint == "scatter":
         if _has_scatter_shape(rows, columns):
             return "scatter"
@@ -414,7 +436,7 @@ def _has_time_column(columns: list[str]) -> bool:
 
 
 def _has_bar_shape(rows: list[dict[str, Any]], columns: list[str]) -> bool:
-    return _preferred_category_column(rows, columns) is not None and bool(_primary_numeric_columns(rows, columns))
+    return _preferred_category_column(rows, columns) is not None and bool(_plottable_numeric_columns(rows, columns))
 
 
 def _has_scatter_shape(rows: list[dict[str, Any]], columns: list[str]) -> bool:
@@ -445,6 +467,17 @@ def _primary_numeric_columns(rows: list[dict[str, Any]], columns: list[str]) -> 
         column
         for column in _numeric_columns(rows, columns)
         if not _is_count_column(column) and not _is_minmax_column(column)
+    ]
+
+
+def _plottable_numeric_columns(rows: list[dict[str, Any]], columns: list[str]) -> list[str]:
+    primary = _primary_numeric_columns(rows, columns)
+    if primary:
+        return primary
+    return [
+        column
+        for column in _numeric_columns(rows, columns)
+        if not _is_minmax_column(column)
     ]
 
 
@@ -504,7 +537,7 @@ def _export_downloads(
     }
     labels = {
         "csv": "CSV",
-        "pdf": "LaTeX PDF report",
+        "pdf": "PDF",
     }
     base_url = public_api_base_url()
 

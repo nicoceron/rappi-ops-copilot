@@ -243,7 +243,7 @@ def render_query_result_latex(result: Any) -> str:
 
 \begin{{center}}
 {{\Huge \textbf{{Rappi Ops Query Export}}}}\\[4pt]
-{{\large CSV companion and LaTeX-generated PDF report}}\\[2pt]
+{{\large CSV companion and PDF report}}\\[2pt]
 {{\small Generated from cached API result {_latex_escape(getattr(result, "query_id", ""))}}}
 \end{{center}}
 
@@ -670,7 +670,8 @@ def _query_result_table(rows: list[Any], columns: list[str]) -> str:
 
 
 def _query_result_chart(result: Any, rows: list[Any], columns: list[str]) -> str:
-    chart_from_payload = _query_chart_from_payload(getattr(result, "chart", None))
+    chart_payload = _chart_payload(getattr(result, "chart", None))
+    chart_from_payload = _query_chart_from_payload(chart_payload)
     if chart_from_payload:
         return chart_from_payload
 
@@ -678,13 +679,22 @@ def _query_result_chart(result: Any, rows: list[Any], columns: list[str]) -> str
         return ""
 
     hint = _resolved_query_chart_hint(result, rows, columns)
-    chart = getattr(result, "chart", None)
-    preferred_x = _valid_chart_column(getattr(chart, "x", None), columns)
-    preferred_y = _valid_chart_column(getattr(chart, "y", None), columns)
-    preferred_series = _valid_chart_column(getattr(chart, "series", None), columns)
-    if hint == "none" or hint == "table":
+    preferred_x = _valid_chart_column(
+        chart_payload.get("x") or chart_payload.get("xKey") or chart_payload.get("category"),
+        columns,
+    )
+    preferred_y = _valid_chart_column(
+        chart_payload.get("y") or chart_payload.get("yKey") or chart_payload.get("metric"),
+        columns,
+    )
+    preferred_series = _valid_chart_column(chart_payload.get("series"), columns)
+    if hint == "none":
         return ""
-    if hint == "line":
+    if hint == "table":
+        hint = _auto_query_chart_hint(rows, columns)
+    if hint == "table":
+        return ""
+    if hint in {"line", "area"}:
         return _query_line_chart(
             rows,
             columns,
@@ -692,8 +702,16 @@ def _query_result_chart(result: Any, rows: list[Any], columns: list[str]) -> str
             preferred_y=preferred_y,
             preferred_series=preferred_series,
         )
-    if hint == "scatter":
+    if hint in {"scatter", "bubble"}:
         return _query_scatter_chart(rows, columns, preferred_x=preferred_x, preferred_y=preferred_y)
+    if hint in {"pie", "donut"}:
+        return _query_pie_chart_from_rows(
+            rows,
+            columns,
+            preferred_x=preferred_x,
+            preferred_y=preferred_y,
+            donut=hint == "donut",
+        )
     return _query_bar_chart(rows, columns, preferred_x=preferred_x, preferred_y=preferred_y)
 
 
@@ -702,17 +720,52 @@ def _query_chart_from_payload(chart: Any) -> str:
     if not payload:
         return ""
 
-    chart_type = _normalize_query_chart_hint(str(payload.get("type") or ""))
+    chart_type = _normalize_query_chart_hint(
+        str(
+            payload.get("type")
+            or payload.get("kind")
+            or payload.get("chartType")
+            or payload.get("visualization")
+            or ""
+        )
+    )
     if chart_type in {"none", "table"}:
         return ""
 
-    x_key = _payload_string(payload.get("xKey")) or _payload_string(payload.get("x"))
-    y_keys = _payload_y_keys(payload)
-    data = [row for row in payload.get("data", []) if isinstance(row, dict)]
+    shape = _payload_chart_shape(payload, chart_type)
     title = _payload_string(payload.get("title"))
-    if not x_key or not y_keys or not data:
+    if not shape:
         return ""
 
+    data = shape["data"]
+    x_key = shape["x_key"]
+    y_keys = shape["y_keys"]
+    z_key = shape.get("z_key")
+    stacked = _payload_chart_mode(payload) == "stacked"
+
+    if chart_type in {"pie", "donut"}:
+        return _query_pie_chart_from_payload(
+            data,
+            x_key=x_key,
+            y_key=y_keys[0],
+            title=title,
+            donut=chart_type == "donut",
+        )
+    if chart_type == "area":
+        return _query_area_chart_from_payload(
+            data,
+            x_key=x_key,
+            y_keys=y_keys,
+            title=title,
+            stacked=stacked,
+        )
+    if chart_type == "combo":
+        return _query_combo_chart_from_payload(
+            data,
+            x_key=x_key,
+            y_keys=y_keys,
+            title=title,
+        )
     if chart_type == "line":
         return _query_line_chart_from_payload(
             data,
@@ -720,18 +773,20 @@ def _query_chart_from_payload(chart: Any) -> str:
             y_keys=y_keys,
             title=title,
         )
-    if chart_type == "scatter":
+    if chart_type in {"scatter", "bubble"}:
         return _query_scatter_chart_from_payload(
             data,
             x_key=x_key,
             y_key=y_keys[0],
             title=title,
+            z_key=z_key if chart_type == "bubble" else None,
         )
     return _query_bar_chart_from_payload(
         data,
         x_key=x_key,
         y_keys=y_keys,
         title=title,
+        stacked=stacked,
     )
 
 
@@ -744,7 +799,39 @@ def _chart_payload(chart: Any) -> dict[str, Any]:
         dumped = chart.model_dump(mode="json")
         return dumped if isinstance(dumped, dict) else {}
     payload: dict[str, Any] = {}
-    for key in ["type", "title", "x", "y", "series", "xKey", "yKeys", "data"]:
+    for key in [
+        "type",
+        "kind",
+        "chartType",
+        "visualization",
+        "title",
+        "name",
+        "label",
+        "x",
+        "y",
+        "series",
+        "xKey",
+        "yKey",
+        "yKeys",
+        "zKey",
+        "sizeKey",
+        "radiusKey",
+        "category",
+        "nameKey",
+        "labelKey",
+        "valueKey",
+        "data",
+        "labels",
+        "categories",
+        "values",
+        "datasets",
+        "points",
+        "mode",
+        "variant",
+        "layout",
+        "stacked",
+        "chartjs",
+    ]:
         if hasattr(chart, key):
             payload[key] = getattr(chart, key)
     return payload
@@ -763,8 +850,274 @@ def _payload_y_keys(payload: dict[str, Any]) -> list[str]:
         y_keys = [item.strip() for item in raw_y_keys if isinstance(item, str) and item.strip()]
         if y_keys:
             return y_keys
-    y_key = _payload_string(payload.get("y"))
-    return [y_key] if y_key else []
+    for key in ["yKey", "y", "metric", "valueKey"]:
+        y_key = _payload_string(payload.get(key))
+        if y_key:
+            return [y_key]
+    return []
+
+
+def _payload_chart_shape(payload: dict[str, Any], chart_type: str) -> dict[str, Any] | None:
+    for extractor in [
+        _payload_label_dataset_shape,
+        _payload_label_value_shape,
+        _payload_xy_shape,
+    ]:
+        shape = extractor(payload)
+        if shape:
+            return shape
+
+    if chart_type == "histogram":
+        histogram = _payload_histogram_shape(payload)
+        if histogram:
+            return histogram
+
+    rows = _payload_direct_rows(payload)
+    if not rows:
+        return None
+
+    x_key = (
+        _payload_string(payload.get("xKey"))
+        or _payload_string(payload.get("x"))
+        or _payload_string(payload.get("category"))
+        or _payload_string(payload.get("nameKey"))
+        or _payload_string(payload.get("labelKey"))
+        or _infer_payload_x_key(rows, chart_type)
+    )
+    if not x_key:
+        return None
+
+    z_key = (
+        _payload_string(payload.get("zKey"))
+        or _payload_string(payload.get("sizeKey"))
+        or _payload_string(payload.get("radiusKey"))
+    )
+    y_keys = _payload_y_keys(payload)
+    if not y_keys:
+        y_keys = _infer_payload_y_keys(rows, x_key=x_key, z_key=z_key, chart_type=chart_type)
+    if not z_key and chart_type == "bubble" and y_keys:
+        z_key = _infer_payload_z_key(rows, x_key=x_key, y_key=y_keys[0])
+
+    return {"data": rows, "x_key": x_key, "y_keys": y_keys, "z_key": z_key} if y_keys else None
+
+
+def _payload_direct_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data")
+    if isinstance(data, list):
+        rows = [row for row in data if isinstance(row, dict)]
+        if rows:
+            return rows
+    points = payload.get("points")
+    if isinstance(points, list):
+        return [row for row in points if isinstance(row, dict)]
+    return []
+
+
+def _payload_object_sources(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    sources = [payload]
+    data = payload.get("data")
+    if isinstance(data, dict):
+        sources.append(data)
+    chartjs = payload.get("chartjs")
+    if isinstance(chartjs, dict) and isinstance(chartjs.get("data"), dict):
+        sources.append(chartjs["data"])
+    return sources
+
+
+def _payload_label_dataset_shape(payload: dict[str, Any]) -> dict[str, Any] | None:
+    for source in _payload_object_sources(payload):
+        labels = _payload_list(source.get("labels")) or _payload_list(source.get("categories"))
+        datasets = _payload_list(source.get("datasets")) or _payload_list(source.get("series"))
+        dataset_rows = [dataset for dataset in datasets or [] if isinstance(dataset, dict)]
+        if not labels or not dataset_rows:
+            continue
+
+        x_key = (
+            _payload_string(payload.get("xKey"))
+            or _payload_string(payload.get("x"))
+            or _payload_string(payload.get("category"))
+            or _payload_string(payload.get("nameKey"))
+            or _payload_string(payload.get("labelKey"))
+            or "label"
+        )
+        rows: list[dict[str, Any]] = [{x_key: label} for label in labels]
+        y_keys: list[str] = []
+        for index, dataset in enumerate(dataset_rows):
+            y_key = (
+                _payload_string(dataset.get("label"))
+                or _payload_string(dataset.get("name"))
+                or _payload_string(dataset.get("key"))
+                or _payload_string(dataset.get("metric"))
+                or _payload_string(dataset.get("yKey"))
+                or f"value_{index + 1}"
+            )
+            values = _payload_list(dataset.get("data")) or _payload_list(dataset.get("values"))
+            if not values:
+                continue
+            y_keys.append(y_key)
+            for value_index, value in enumerate(values[: len(rows)]):
+                rows[value_index][y_key] = _payload_point_value(value, y_key)
+        if y_keys:
+            return {"data": rows, "x_key": x_key, "y_keys": y_keys}
+    return None
+
+
+def _payload_label_value_shape(payload: dict[str, Any]) -> dict[str, Any] | None:
+    for source in _payload_object_sources(payload):
+        labels = _payload_list(source.get("labels")) or _payload_list(source.get("categories"))
+        values = _payload_list(source.get("values")) or _payload_list(source.get("y"))
+        if not labels or not values:
+            continue
+
+        x_key = (
+            _payload_string(payload.get("xKey"))
+            or _payload_string(payload.get("x"))
+            or _payload_string(payload.get("category"))
+            or _payload_string(payload.get("nameKey"))
+            or _payload_string(payload.get("labelKey"))
+            or "label"
+        )
+        y_key = _payload_string(payload.get("yKey")) or _payload_string(payload.get("metric")) or _payload_string(payload.get("valueKey")) or "value"
+        rows = [
+            {x_key: label, y_key: _payload_point_value(values[index], y_key)}
+            for index, label in enumerate(labels[: len(values)])
+        ]
+        return {"data": rows, "x_key": x_key, "y_keys": [y_key]}
+    return None
+
+
+def _payload_xy_shape(payload: dict[str, Any]) -> dict[str, Any] | None:
+    x_values = _payload_list(payload.get("x"))
+    y_values = _payload_list(payload.get("y"))
+    if not x_values or not y_values:
+        return None
+    x_key = (
+        _payload_string(payload.get("xKey"))
+        or _payload_string(payload.get("category"))
+        or _payload_string(payload.get("nameKey"))
+        or _payload_string(payload.get("labelKey"))
+        or "x"
+    )
+    y_key = _payload_string(payload.get("yKey")) or _payload_string(payload.get("metric")) or _payload_string(payload.get("valueKey")) or "y"
+    rows = [
+        {x_key: x_value, y_key: _payload_point_value(y_values[index], y_key)}
+        for index, x_value in enumerate(x_values[: len(y_values)])
+    ]
+    return {"data": rows, "x_key": x_key, "y_keys": [y_key]}
+
+
+def _payload_histogram_shape(payload: dict[str, Any]) -> dict[str, Any] | None:
+    raw_values = _payload_list(payload.get("values")) or _payload_list(payload.get("data"))
+    values = [_to_float(value) for value in raw_values or []]
+    values = [value for value in values if value is not None]
+    if len(values) < 2:
+        return None
+    minimum = min(values)
+    maximum = max(values)
+    if minimum == maximum:
+        return {"data": [{"bin": _format_number(minimum, 2), "count": len(values)}], "x_key": "bin", "y_keys": ["count"]}
+
+    bin_count = min(10, max(4, math.ceil(math.sqrt(len(values)))))
+    width = (maximum - minimum) / bin_count
+    bins = [{"start": minimum + index * width, "end": minimum + (index + 1) * width, "count": 0} for index in range(bin_count)]
+    bins[-1]["end"] = maximum
+    for value in values:
+        index = min(bin_count - 1, int((value - minimum) / width))
+        bins[index]["count"] += 1
+    rows = [
+        {
+            "bin": f"{_format_number(bin['start'], 2)}-{_format_number(bin['end'], 2)}",
+            "count": bin["count"],
+        }
+        for bin in bins
+    ]
+    return {"data": rows, "x_key": "bin", "y_keys": ["count"]}
+
+
+def _payload_list(value: Any) -> list[Any] | None:
+    return value if isinstance(value, list) else None
+
+
+def _payload_point_value(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        for candidate_key in [key, "y", "value", "count", "total", "x"]:
+            if candidate_key in value and value[candidate_key] is not None:
+                return value[candidate_key]
+        return ""
+    return value
+
+
+def _infer_payload_x_key(rows: list[dict[str, Any]], chart_type: str) -> str | None:
+    keys = list(dict.fromkeys(key for row in rows for key in row))
+    if not keys:
+        return None
+    preferred = (
+        ["x"]
+        if chart_type in {"scatter", "bubble"}
+        else ["label", "name", "category", "x", "week_label", "week", "date", "zone", "city", "country"]
+    )
+    normalized = {key.lower(): key for key in keys}
+    for key in preferred:
+        if key in normalized:
+            return normalized[key]
+    for key in keys:
+        if any(_to_float(row.get(key)) is None for row in rows):
+            return key
+    return keys[0]
+
+
+def _infer_payload_y_keys(
+    rows: list[dict[str, Any]],
+    *,
+    x_key: str,
+    z_key: str | None,
+    chart_type: str,
+) -> list[str]:
+    numeric = [
+        key
+        for key in dict.fromkeys(key for row in rows for key in row)
+        if key not in {x_key, z_key} and any(_to_float(row.get(key)) is not None for row in rows)
+    ]
+    if chart_type in {"scatter", "bubble"} and "y" in numeric:
+        return ["y"]
+    if "value" in numeric:
+        return ["value"]
+    limit = 8 if chart_type in {"line", "area", "combo"} else 4
+    return numeric[:limit]
+
+
+def _infer_payload_z_key(rows: list[dict[str, Any]], *, x_key: str, y_key: str) -> str | None:
+    numeric = [
+        key
+        for key in dict.fromkeys(key for row in rows for key in row)
+        if key not in {x_key, y_key} and any(_to_float(row.get(key)) is not None for row in rows)
+    ]
+    normalized = {key.lower(): key for key in numeric}
+    for key in ["z", "size", "radius", "volume", "count", "n", "orders"]:
+        if key in normalized:
+            return normalized[key]
+    return numeric[0] if numeric else None
+
+
+def _payload_chart_mode(payload: dict[str, Any]) -> str:
+    raw = " ".join(
+        str(value)
+        for value in [
+            payload.get("type"),
+            payload.get("kind"),
+            payload.get("chartType"),
+            payload.get("mode"),
+            payload.get("variant"),
+            payload.get("layout"),
+        ]
+        if value is not None
+    ).lower()
+    raw = re.sub(r"[_-]+", " ", raw)
+    if payload.get("stacked") is True or re.search(r"\bstack(?:ed)?\b", raw):
+        return "stacked"
+    if re.search(r"\bgroup(?:ed)?\b", raw):
+        return "grouped"
+    return ""
 
 
 def _query_bar_chart_from_payload(
@@ -773,6 +1126,7 @@ def _query_bar_chart_from_payload(
     x_key: str,
     y_keys: list[str],
     title: str | None,
+    stacked: bool = False,
 ) -> str:
     x_labels = [_chart_label(row.get(x_key)) for row in data]
     x_labels = [label for label in x_labels if label]
@@ -781,18 +1135,27 @@ def _query_bar_chart_from_payload(
 
     plots = []
     colors = ["rappiOrange", "rappiBlue", "rappiGreen", "rappiPurple"]
-    for index, y_key in enumerate(y_keys):
+    series_indexes = list(range(len(y_keys) - 1, -1, -1)) if stacked and len(y_keys) > 1 else list(range(len(y_keys)))
+    for index in series_indexes:
+        y_key = y_keys[index]
         coords = []
         for point_index, row in enumerate(data):
-            value = _to_float(row.get(y_key))
+            if stacked and len(y_keys) > 1:
+                values = [_to_float(row.get(key)) or 0.0 for key in y_keys[: index + 1]]
+                value = sum(values)
+            else:
+                value = _to_float(row.get(y_key))
             label = _chart_label(row.get(x_key))
             if value is None or not label:
                 continue
             coords.append(f"({point_index},{value:.6g})")
         if coords:
             color = colors[index % len(colors)]
+            plot_options = f"fill={color}, draw={color}"
+            if stacked and len(y_keys) > 1:
+                plot_options += ", bar shift=0pt"
             plots.append(
-                f"\\addplot+[ybar, fill={color}, draw={color}] coordinates "
+                f"\\addplot[{plot_options}] coordinates "
                 f"{{{' '.join(coords)}}};\n"
                 f"\\addlegendentry{{{_latex_escape(_truncate(y_key, 28))}}}"
             )
@@ -803,19 +1166,88 @@ def _query_bar_chart_from_payload(
     bar_width = _payload_bar_width(len(data))
     ylabel = _axis_title(y_keys[0]) if len(y_keys) == 1 else "Value"
     legend = (
-        "legend style={font=\\scriptsize, at={(1.02,1)}, anchor=north west},"
+        "legend style={font=\\scriptsize, at={(0.02,0.98)}, anchor=north west, fill=white, fill opacity=0.82, text opacity=1, draw=rappiLine},"
         if len(y_keys) > 1
         else "legend style={draw=none},"
     )
     caption = title or _chart_title("Bar chart", y_keys[0], x_key)
+    ybar_mode = "ybar, bar shift=0pt," if stacked and len(y_keys) > 1 else "ybar,"
     return rf"""\begin{{figure}}[H]
 \centering
 \begin{{tikzpicture}}
 \begin{{axis}}[
   width=0.95\linewidth,
   height=6.7cm,
-  ybar,
+  {ybar_mode}
   bar width={bar_width:.2f}pt,
+  xlabel={{{_latex_escape(_axis_title(x_key))}}},
+  ylabel={{{_latex_escape(ylabel)}}},
+  xtick={{{xticks}}},
+  xticklabels={{{xticklabels}}},
+  xticklabel style={{{tick_style}}},
+  ymajorgrids=true,
+  grid style={{draw=rappiLine}},
+  {legend}
+]
+{chr(10).join(plots)}
+\end{{axis}}
+\end{{tikzpicture}}
+\caption{{{_latex_escape(caption)}}}
+\end{{figure}}
+"""
+
+
+def _query_area_chart_from_payload(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_keys: list[str],
+    title: str | None,
+    stacked: bool = False,
+) -> str:
+    if len(data) < 2:
+        return ""
+
+    plots = []
+    colors = ["rappiBlue", "rappiOrange", "rappiGreen", "rappiPurple", "rappiRed", "rappiMuted"]
+    for index, y_key in enumerate(y_keys):
+        coords = []
+        for point_index, row in enumerate(data):
+            value = _to_float(row.get(y_key))
+            if value is not None:
+                coords.append(f"({point_index},{value:.6g})")
+        if len(coords) >= 2:
+            color = colors[index % len(colors)]
+            if stacked:
+                plots.append(
+                    f"\\addplot+[mark=none, thick, color={color}, fill={color}!22] coordinates "
+                    f"{{{' '.join(coords)}}} \\closedcycle;\n"
+                    f"\\addlegendentry{{{_latex_escape(_truncate(y_key, 28))}}}"
+                )
+            else:
+                plots.append(
+                    f"\\addplot+[mark=none, thick, color={color}, fill={color}!18] coordinates "
+                    f"{{{' '.join(coords)}}} \\closedcycle;\n"
+                    f"\\addlegendentry{{{_latex_escape(_truncate(y_key, 28))}}}"
+                )
+    if not plots:
+        return ""
+
+    xticks, xticklabels, tick_style = _payload_tick_options(data, x_key)
+    ylabel = _axis_title(y_keys[0]) if len(y_keys) == 1 else "Value"
+    legend = (
+        "legend style={font=\\scriptsize, at={(0.02,0.98)}, anchor=north west, fill=white, fill opacity=0.82, text opacity=1, draw=rappiLine},"
+        if len(y_keys) > 1
+        else "legend style={draw=none},"
+    )
+    caption = title or _chart_title("Area chart", y_keys[0], x_key)
+    return rf"""\begin{{figure}}[H]
+\centering
+\begin{{tikzpicture}}
+\begin{{axis}}[
+  width=0.95\linewidth,
+  height=6.7cm,
+  ymin=0,
   xlabel={{{_latex_escape(_axis_title(x_key))}}},
   ylabel={{{_latex_escape(ylabel)}}},
   xtick={{{xticks}}},
@@ -864,7 +1296,7 @@ def _query_line_chart_from_payload(
     xticks, xticklabels, tick_style = _payload_tick_options(data, x_key)
     ylabel = _axis_title(y_keys[0]) if len(y_keys) == 1 else "Value"
     legend = (
-        "legend style={font=\\scriptsize, at={(1.02,1)}, anchor=north west},"
+        "legend style={font=\\scriptsize, at={(0.02,0.98)}, anchor=north west, fill=white, fill opacity=0.82, text opacity=1, draw=rappiLine},"
         if len(y_keys) > 1
         else "legend style={draw=none},"
     )
@@ -888,6 +1320,186 @@ def _query_line_chart_from_payload(
 \end{{axis}}
 \end{{tikzpicture}}
 \caption{{{_latex_escape(caption)}}}
+\end{{figure}}
+"""
+
+
+def _query_combo_chart_from_payload(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_keys: list[str],
+    title: str | None,
+) -> str:
+    if len(data) < 2 or len(y_keys) < 2:
+        return _query_bar_chart_from_payload(data, x_key=x_key, y_keys=y_keys, title=title)
+
+    plots = []
+    colors = ["rappiOrange", "rappiBlue", "rappiGreen", "rappiPurple", "rappiRed", "rappiMuted"]
+    first_key = y_keys[0]
+    bar_coords = []
+    for point_index, row in enumerate(data):
+        value = _to_float(row.get(first_key))
+        if value is not None and _chart_label(row.get(x_key)):
+            bar_coords.append(f"({point_index},{value:.6g})")
+    if bar_coords:
+        plots.append(
+            f"\\addplot+[ybar, fill={colors[0]}, draw={colors[0]}] coordinates "
+            f"{{{' '.join(bar_coords)}}};\n"
+            f"\\addlegendentry{{{_latex_escape(_truncate(first_key, 28))}}}"
+        )
+
+    for index, y_key in enumerate(y_keys[1:], start=1):
+        coords = []
+        for point_index, row in enumerate(data):
+            value = _to_float(row.get(y_key))
+            if value is not None:
+                coords.append(f"({point_index},{value:.6g})")
+        if len(coords) >= 2:
+            color = colors[index % len(colors)]
+            plots.append(
+                f"\\addplot+[mark=*, thick, color={color}] coordinates "
+                f"{{{' '.join(coords)}}};\n"
+                f"\\addlegendentry{{{_latex_escape(_truncate(y_key, 28))}}}"
+            )
+    if not plots:
+        return ""
+
+    xticks, xticklabels, tick_style = _payload_tick_options(data, x_key)
+    bar_width = _payload_bar_width(len(data))
+    caption = title or _chart_title("Combo chart", first_key, x_key)
+    return rf"""\begin{{figure}}[H]
+\centering
+\begin{{tikzpicture}}
+\begin{{axis}}[
+  width=0.95\linewidth,
+  height=6.7cm,
+  bar width={bar_width:.2f}pt,
+  xlabel={{{_latex_escape(_axis_title(x_key))}}},
+  ylabel={{Value}},
+  xtick={{{xticks}}},
+  xticklabels={{{xticklabels}}},
+  xticklabel style={{{tick_style}}},
+  ymajorgrids=true,
+  grid style={{draw=rappiLine}},
+  legend style={{font=\scriptsize, at={{(0.02,0.98)}}, anchor=north west, fill=white, fill opacity=0.82, text opacity=1, draw=rappiLine}},
+]
+{chr(10).join(plots)}
+\end{{axis}}
+\end{{tikzpicture}}
+\caption{{{_latex_escape(caption)}}}
+\end{{figure}}
+"""
+
+
+def _query_pie_chart_from_payload(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_key: str,
+    title: str | None,
+    donut: bool = False,
+) -> str:
+    slices = _pie_slices(data, x_key=x_key, y_key=y_key)
+    if len(slices) < 2:
+        return ""
+
+    return _tikz_pie_chart(
+        title=title or _chart_title("Donut chart" if donut else "Pie chart", y_key, x_key),
+        slices=slices,
+        donut=donut,
+    )
+
+
+def _query_pie_chart_from_rows(
+    rows: list[Any],
+    columns: list[str],
+    *,
+    preferred_x: str | None,
+    preferred_y: str | None,
+    donut: bool = False,
+) -> str:
+    category_col = preferred_x or _preferred_category_column(rows, columns)
+    y_col = preferred_y or _preferred_y_column(rows, columns, exclude={category_col or ""})
+    if category_col is None or y_col is None:
+        return ""
+
+    row_dicts = [row for row in rows if isinstance(row, dict)]
+    slices = _pie_slices(row_dicts, x_key=category_col, y_key=y_col)
+    if len(slices) < 2:
+        return ""
+
+    return _tikz_pie_chart(
+        title=_chart_title("Donut chart" if donut else "Pie chart", y_col, category_col),
+        slices=slices,
+        donut=donut,
+    )
+
+
+def _pie_slices(
+    data: list[dict[str, Any]],
+    *,
+    x_key: str,
+    y_key: str,
+) -> list[tuple[str, float]]:
+    slices = []
+    for row in data:
+        label = _chart_label(row.get(x_key))
+        value = _to_float(row.get(y_key))
+        if label and value is not None and value > 0:
+            slices.append((_truncate(label, 28), value))
+    slices = sorted(slices, key=lambda item: item[1], reverse=True)
+    if len(slices) > 8:
+        kept = slices[:7]
+        other = sum(value for _, value in slices[7:])
+        slices = kept + [("Other", other)]
+    return slices
+
+
+def _tikz_pie_chart(
+    *,
+    title: str,
+    slices: list[tuple[str, float]],
+    donut: bool,
+) -> str:
+    total = sum(value for _, value in slices)
+    if total <= 0:
+        return ""
+
+    colors = ["rappiOrange", "rappiBlue", "rappiGreen", "rappiPurple", "rappiRed", "rappiMuted"]
+    start = 90.0
+    paths = []
+    legend_rows = []
+    for index, (label, value) in enumerate(slices):
+        angle = 360.0 * value / total
+        end = start - angle
+        color = colors[index % len(colors)]
+        paths.append(
+            f"\\path[fill={color}, draw=white, line width=0.7pt] "
+            f"(0,0) -- ({start:.4f}:2.15) arc ({start:.4f}:{end:.4f}:2.15) -- cycle;"
+        )
+        legend_rows.append(
+            f"\\node[anchor=west, font=\\scriptsize] at (0, {-0.34 * index:.2f}) "
+            f"{{\\textcolor{{{color}}}{{\\rule{{7pt}}{{7pt}}}} "
+            f"{_latex_escape(label)} ({value / total * 100:.1f}\\%)}};"
+        )
+        start = end
+
+    center = (
+        "\\fill[white] (0,0) circle (1.05);\n\\draw[rappiLine, line width=0.4pt] (0,0) circle (1.05);"
+        if donut
+        else ""
+    )
+    return rf"""\begin{{figure}}[H]
+\centering
+\begin{{tikzpicture}}
+{chr(10).join(paths)}
+{center}
+\begin{{scope}}[xshift=3.05cm,yshift=1.25cm]
+{chr(10).join(legend_rows)}
+\end{{scope}}
+\end{{tikzpicture}}
+\caption{{{_latex_escape(title)}}}
 \end{{figure}}
 """
 
@@ -931,6 +1543,7 @@ def _query_scatter_chart_from_payload(
     x_key: str,
     y_key: str,
     title: str | None,
+    z_key: str | None = None,
 ) -> str:
     coords = []
     for row in data:
@@ -941,6 +1554,7 @@ def _query_scatter_chart_from_payload(
     if len(coords) < 2:
         return ""
 
+    size_note = f" Bubble size: {_axis_title(z_key)}." if z_key else ""
     caption = title or _chart_title("Scatter chart", y_key, x_key)
     return rf"""\begin{{figure}}[H]
 \centering
@@ -957,7 +1571,7 @@ def _query_scatter_chart_from_payload(
 \addplot+[only marks, mark=*, mark size=3pt, color=rappiPurple] coordinates {{{' '.join(coords)}}};
 \end{{axis}}
 \end{{tikzpicture}}
-\caption{{{_latex_escape(caption)}}}
+\caption{{{_latex_escape(caption + size_note)}}}
 \end{{figure}}
 """
 
@@ -968,7 +1582,8 @@ def _query_chart_hint(result: Any) -> str:
         return _normalize_query_chart_hint(hint)
     chart = getattr(result, "chart", None)
     if chart is not None:
-        return _normalize_query_chart_hint(str(getattr(chart, "type", "") or "").strip().lower())
+        payload = _chart_payload(chart)
+        return _normalize_query_chart_hint(str(payload.get("type") or "").strip().lower())
     return ""
 
 
@@ -980,26 +1595,55 @@ def _resolved_query_chart_hint(result: Any, rows: list[Any], columns: list[str])
         return "table"
     if _is_small_segment_comparison(rows, columns):
         return "bar"
-    if hint == "line":
-        return "line" if _has_time_column(columns) and _primary_numeric_columns(rows, columns) else "table"
-    if hint == "scatter":
+    if hint in {"line", "area"}:
+        return hint if _has_time_column(columns) and _plottable_numeric_columns(rows, columns) else "table"
+    if hint in {"scatter", "bubble"}:
         if _has_scatter_shape(rows, columns):
-            return "scatter"
+            return hint
         return "bar" if _has_bar_shape(rows, columns) else "table"
+    if hint in {"pie", "donut", "histogram", "combo"}:
+        return hint if _has_bar_shape(rows, columns) else "table"
     if hint == "bar":
         return "bar" if _has_bar_shape(rows, columns) else "table"
     return "table"
 
 
+def _auto_query_chart_hint(rows: list[Any], columns: list[str]) -> str:
+    if not rows or not columns:
+        return "table"
+    if _is_small_segment_comparison(rows, columns):
+        return "bar"
+    if _has_time_column(columns) and _plottable_numeric_columns(rows, columns):
+        return "line"
+    if _has_bar_shape(rows, columns):
+        return "bar"
+    if _has_scatter_shape(rows, columns):
+        return "scatter"
+    return "table"
+
+
 def _normalize_query_chart_hint(value: str) -> str:
+    text = re.sub(r"[\s-]+", "_", str(value or "").strip().lower())
+    if text in {"none", "table", "bar", "line", "scatter", "area", "pie", "donut", "histogram", "bubble", "combo"}:
+        return text
+    if text in {"doughnut", "donut_chart", "doughnut_chart"}:
+        return "donut"
+    if text in {"pie_chart"}:
+        return "pie"
+    if text in {"bar_chart", "column", "columns", "column_chart", "grouped_bar", "stacked_bar", "horizontal_bar"}:
+        return "bar"
+    if text in {"trend", "timeseries", "time_series", "line_chart", "area_chart", "stacked_area"}:
+        return "area" if "area" in text else "line"
+    if text in {"scatterplot", "scatter_plot"}:
+        return "scatter"
+    if text in {"bubble_chart"}:
+        return "bubble"
+    if text in {"histograma", "distribution"}:
+        return "histogram"
+    if text in {"combined", "composed", "mixed", "dual_axis"}:
+        return "combo"
     if value in {"none", "table", "bar", "line", "scatter"}:
         return value
-    if value in {"column", "columns", "pie", "donut", "histogram"}:
-        return "bar"
-    if value in {"trend", "timeseries", "time_series", "area"}:
-        return "line"
-    if value in {"bubble"}:
-        return "scatter"
     return "table"
 
 
@@ -1015,7 +1659,7 @@ def _has_time_column(columns: list[str]) -> bool:
 
 def _has_bar_shape(rows: list[Any], columns: list[str]) -> bool:
     return _preferred_category_column(rows, columns) is not None and bool(
-        _primary_numeric_columns(rows, columns)
+        _plottable_numeric_columns(rows, columns)
     )
 
 
@@ -1042,6 +1686,17 @@ def _primary_numeric_columns(rows: list[Any], columns: list[str]) -> list[str]:
         column
         for column in _numeric_columns(rows, columns)
         if not _is_count_column(column) and not _is_minmax_column(column)
+    ]
+
+
+def _plottable_numeric_columns(rows: list[Any], columns: list[str]) -> list[str]:
+    primary = _primary_numeric_columns(rows, columns)
+    if primary:
+        return primary
+    return [
+        column
+        for column in _numeric_columns(rows, columns)
+        if not _is_minmax_column(column)
     ]
 
 

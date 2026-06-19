@@ -76,14 +76,36 @@ def resolve_chart_type(
 
 
 def _normalize_chart_type(value: str) -> str:
-    text = str(value or "").strip().lower()
+    text = re.sub(r"[\s-]+", "_", str(value or "").strip().lower())
     if text in {"none", "table", "bar", "line", "scatter"}:
         return text
-    if text in {"column", "columns", "pie", "donut", "histogram"}:
+    if text in {
+        "bar_chart",
+        "column",
+        "columns",
+        "column_chart",
+        "grouped_bar",
+        "stacked_bar",
+        "horizontal_bar",
+        "pie",
+        "pie_chart",
+        "donut",
+        "doughnut",
+        "donut_chart",
+        "doughnut_chart",
+        "histogram",
+        "histograma",
+        "distribution",
+        "combo",
+        "combined",
+        "composed",
+        "mixed",
+        "dual_axis",
+    }:
         return "bar"
-    if text in {"trend", "timeseries", "time_series", "area"}:
+    if text in {"line_chart", "trend", "timeseries", "time_series", "area", "area_chart", "stacked_area"}:
         return "line"
-    if text in {"bubble"}:
+    if text in {"scatterplot", "scatter_plot", "bubble", "bubble_chart"}:
         return "scatter"
     if text in {"", "auto", "chart", "graph", "plot", "visualization"}:
         return "auto"
@@ -102,7 +124,7 @@ def _bar_chart_from_rows(
         return None
 
     is_segment_comparison = _is_small_segment_comparison(rows, columns)
-    y_keys = _primary_numeric_columns(rows, columns, x_key, preferred_y=preferred_y)
+    y_keys = _plottable_numeric_columns(rows, columns, x_key, preferred_y=preferred_y)
     y_keys = y_keys[: 1 if is_segment_comparison else 2]
     if not y_keys:
         return None
@@ -361,6 +383,26 @@ def _primary_numeric_columns(
     return numeric
 
 
+def _plottable_numeric_columns(
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    x_key: str,
+    *,
+    preferred_y: str | None = None,
+) -> list[str]:
+    primary = _primary_numeric_columns(rows, columns, x_key, preferred_y=preferred_y)
+    if primary:
+        return primary
+    fallback = [
+        column
+        for column in _numeric_columns(rows, columns)
+        if column != x_key and not _is_minmax_like_key(column)
+    ]
+    if preferred_y in fallback:
+        fallback = [preferred_y] + [column for column in fallback if column != preferred_y]
+    return sorted(fallback, key=_metric_column_priority)
+
+
 def _first_primary_numeric_column(
     rows: list[dict[str, Any]],
     columns: list[str],
@@ -396,7 +438,7 @@ def _numeric_columns(rows: list[dict[str, Any]], columns: list[str]) -> list[str
 
 def _has_bar_shape(rows: list[dict[str, Any]], columns: list[str]) -> bool:
     x_key = _select_category_key(columns, rows)
-    return bool(x_key and _primary_numeric_columns(rows, columns, x_key))
+    return bool(x_key and _plottable_numeric_columns(rows, columns, x_key))
 
 
 def _has_scatter_shape(rows: list[dict[str, Any]], columns: list[str]) -> bool:

@@ -41,7 +41,7 @@ For the Docker Compose stack:
   `/webhook/rappi-ops-executive-insights/run`.
 
 The chat workflow treats export requests as both artifacts by default: the CSV
-download and the LaTeX-generated PDF report from `/exports/{query_id}/links?format=both`.
+download and PDF from `/exports/{query_id}/links?format=both`.
 
 The automatic insights workflow is scheduled for Monday 07:00 in
 `America/Bogota` and can also be run from the web UI Reload button. It persists

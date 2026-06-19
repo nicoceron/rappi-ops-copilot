@@ -12,18 +12,25 @@ import {
 } from "lucide-react";
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
+  Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
+  ZAxis,
 } from "recharts";
 
 type N8nChatProps = {
@@ -47,12 +54,17 @@ type ParsedTable = {
   rows: Record<string, string>[];
 };
 
+type ChartKind = "bar" | "line" | "scatter" | "area" | "pie" | "donut" | "histogram" | "bubble" | "combo";
+type ChartMode = "grouped" | "stacked";
+
 type ChartSpec = {
   id: string;
-  type: "bar" | "line" | "scatter";
+  type: ChartKind;
   title: string;
   xKey: string;
   yKeys: string[];
+  zKey?: string;
+  mode?: ChartMode;
   data: Record<string, string | number>[];
 };
 
@@ -67,6 +79,7 @@ type StructuredContent = {
   tables?: ParsedTable[];
   charts?: ChartSpec[];
   exports?: ExportLink[];
+  suggestions?: string[];
 };
 
 const SESSION_STORAGE_KEY = "rappi-ops-copilot-session-id";
@@ -384,8 +397,17 @@ function ResultTable({ table }: { table: ParsedTable }) {
 
 function ChartCard({ chart }: { chart: ChartSpec }) {
   const isLine = chart.type === "line";
-  const isScatter = chart.type === "scatter";
+  const isArea = chart.type === "area";
+  const isCombo = chart.type === "combo";
+  const isPie = chart.type === "pie" || chart.type === "donut";
+  const isScatter = chart.type === "scatter" || chart.type === "bubble";
   const primaryYKey = chart.yKeys[0];
+  const tooltipStyle = {
+    background: "#111111",
+    border: "1px solid rgba(255,255,255,0.14)",
+    borderRadius: 8,
+    color: "#fafafa",
+  };
 
   return (
     <section className="chart-card">
@@ -395,7 +417,28 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
       </div>
       <div className="chart-canvas">
         <ResponsiveContainer width="100%" height="100%">
-          {isScatter ? (
+          {isPie ? (
+            <PieChart>
+              <Tooltip
+                contentStyle={tooltipStyle}
+                itemStyle={{ color: "#fafafa" }}
+                labelStyle={{ color: "#ffffff99" }}
+              />
+              <Legend wrapperStyle={{ color: "#ffffff99", fontSize: 11 }} />
+              <Pie
+                data={chart.data}
+                dataKey={primaryYKey}
+                nameKey={chart.xKey}
+                innerRadius={chart.type === "donut" ? "45%" : 0}
+                outerRadius="78%"
+                paddingAngle={chart.type === "donut" ? 2 : 1}
+              >
+                {chart.data.map((_, pointIndex) => (
+                  <Cell key={`${chart.id}-slice-${pointIndex}`} fill={CHART_COLORS[pointIndex % CHART_COLORS.length]} />
+                ))}
+              </Pie>
+            </PieChart>
+          ) : isScatter ? (
             <ScatterChart margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
               <XAxis
@@ -411,13 +454,9 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
                 type="number"
                 width={42}
               />
+              {chart.type === "bubble" && chart.zKey ? <ZAxis dataKey={chart.zKey} range={[55, 320]} /> : null}
               <Tooltip
-                contentStyle={{
-                  background: "#111111",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 8,
-                  color: "#fafafa",
-                }}
+                contentStyle={tooltipStyle}
                 cursor={{ stroke: "rgba(255,255,255,0.28)" }}
                 itemStyle={{ color: "#fafafa" }}
                 labelStyle={{ color: "#ffffff99" }}
@@ -428,21 +467,64 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
                 ))}
               </Scatter>
             </ScatterChart>
+          ) : isArea ? (
+            <AreaChart data={chart.data} margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#ffffff99", fontSize: 11 }} width={42} />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                itemStyle={{ color: "#fafafa" }}
+                labelStyle={{ color: "#ffffff99" }}
+              />
+              {chart.yKeys.length > 1 ? <Legend wrapperStyle={{ color: "#ffffff99", fontSize: 11 }} /> : null}
+              {chart.yKeys.map((key, index) => (
+                <Area
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={CHART_COLORS[index % CHART_COLORS.length]}
+                  fill={CHART_COLORS[index % CHART_COLORS.length]}
+                  fillOpacity={0.24}
+                  stackId={chart.mode === "stacked" ? "stack" : undefined}
+                />
+              ))}
+            </AreaChart>
+          ) : isCombo ? (
+            <ComposedChart data={chart.data} margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+              <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#ffffff99", fontSize: 11 }} width={42} />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                itemStyle={{ color: "#fafafa" }}
+                labelStyle={{ color: "#ffffff99" }}
+              />
+              <Legend wrapperStyle={{ color: "#ffffff99", fontSize: 11 }} />
+              <Bar dataKey={primaryYKey} fill={CHART_COLORS[0]} radius={[5, 5, 0, 0]} />
+              {chart.yKeys.slice(1).map((key, index) => (
+                <Line
+                  key={key}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={CHART_COLORS[(index + 1) % CHART_COLORS.length]}
+                  strokeWidth={2.4}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+              ))}
+            </ComposedChart>
           ) : isLine ? (
             <LineChart data={chart.data} margin={{ top: 8, right: 18, bottom: 6, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
               <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
               <YAxis tick={{ fill: "#ffffff99", fontSize: 11 }} width={42} />
               <Tooltip
-                contentStyle={{
-                  background: "#111111",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 8,
-                  color: "#fafafa",
-                }}
+                contentStyle={tooltipStyle}
                 itemStyle={{ color: "#fafafa" }}
                 labelStyle={{ color: "#ffffff99" }}
               />
+              {chart.yKeys.length > 1 ? <Legend wrapperStyle={{ color: "#ffffff99", fontSize: 11 }} /> : null}
               {chart.yKeys.map((key, index) => (
                 <Line
                   key={key}
@@ -461,17 +543,18 @@ function ChartCard({ chart }: { chart: ChartSpec }) {
               <XAxis dataKey={chart.xKey} tick={{ fill: "#ffffff99", fontSize: 11 }} />
               <YAxis tick={{ fill: "#ffffff99", fontSize: 11 }} width={42} />
               <Tooltip
-                contentStyle={{
-                  background: "#111111",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 8,
-                  color: "#fafafa",
-                }}
+                contentStyle={tooltipStyle}
                 itemStyle={{ color: "#fafafa" }}
                 labelStyle={{ color: "#ffffff99" }}
               />
+              {chart.yKeys.length > 1 ? <Legend wrapperStyle={{ color: "#ffffff99", fontSize: 11 }} /> : null}
               {chart.yKeys.map((key, index) => (
-                <Bar key={key} dataKey={key} radius={[5, 5, 0, 0]}>
+                <Bar
+                  key={key}
+                  dataKey={key}
+                  radius={chart.mode === "stacked" ? [0, 0, 0, 0] : [5, 5, 0, 0]}
+                  stackId={chart.mode === "stacked" ? "stack" : undefined}
+                >
                   {chart.data.map((_, cellIndex) => (
                     <Cell
                       key={`${key}-${cellIndex}`}
@@ -602,7 +685,8 @@ function parseStructuredContent(text: string, payload: unknown): StructuredConte
   const payloadObject = isRecord(payload) ? payload : null;
   const jsonText = tryParseJson(text);
   const fencedJson = extractFencedJson(text);
-  const candidates = [jsonText, fencedJson, payloadObject].filter(isRecord);
+  const embeddedJsonObjects = extractEmbeddedJsonObjects(text);
+  const candidates = [jsonText, fencedJson, ...embeddedJsonObjects, payloadObject].filter(isRecord);
 
   for (const candidate of candidates) {
     const normalized = normalizeStructuredCandidate(candidate);
@@ -617,10 +701,23 @@ function parseStructuredContent(text: string, payload: unknown): StructuredConte
 function normalizeStructuredCandidate(candidate: Record<string, unknown>): StructuredContent | null {
   const answer = firstString(candidate.answer, candidate.summary, candidate.output, candidate.text);
   const tables = normalizeTables(candidate.table ?? candidate.tables ?? candidate.rows);
-  const charts = normalizeCharts(candidate.chart ?? candidate.charts);
+  const explicitCharts = normalizeCharts(candidate.chart ?? candidate.charts);
+  const charts =
+    explicitCharts.length > 0
+      ? explicitCharts
+      : (tables.map((table) => chartFromTable(table, null)).filter(Boolean) as ChartSpec[]);
   const exports = normalizeExports(candidate.exports ?? candidate.exportLinks ?? candidate.files);
+  const suggestions = normalizeSuggestions(
+    candidate.suggestions ?? candidate.suggested_followups ?? candidate.followups ?? candidate.follow_ups,
+  );
 
-  if (!answer && tables.length === 0 && charts.length === 0 && exports.length === 0) {
+  if (
+    !answer &&
+    tables.length === 0 &&
+    charts.length === 0 &&
+    exports.length === 0 &&
+    suggestions.length === 0
+  ) {
     return null;
   }
 
@@ -629,29 +726,38 @@ function normalizeStructuredCandidate(candidate: Record<string, unknown>): Struc
     tables,
     charts,
     exports,
+    suggestions,
   };
 }
 
 function buildMessagePresentation(message: ChatMessage) {
-  const textSource = message.structured?.answer || message.text;
+  const structured = message.structured ?? parseStructuredContent(message.text, null);
+  const textSource = structured?.answer || message.text;
   const markdownTables = parseMarkdownTables(textSource);
-  const structuredTables = message.structured?.tables ?? [];
+  const structuredTables = structured?.tables ?? [];
   const tables = [...structuredTables, ...markdownTables.tables];
-  const structuredCharts = message.structured?.charts ?? [];
+  const structuredCharts = structured?.charts ?? [];
   const requestedChartType = inferRequestedChartType(message.text);
   const heuristicCharts = tables
     .map((table) => chartFromTable(table, requestedChartType))
     .filter(Boolean) as ChartSpec[];
   const exports = [
-    ...(message.structured?.exports ?? []),
+    ...(structured?.exports ?? []),
     ...extractExportLinks(message.text),
   ];
-  const text = markdownTables.textWithoutTables || textSource;
+  const charts = structuredCharts.length > 0 ? structuredCharts : heuristicCharts;
+  const text = ensureSuggestionSection(markdownTables.textWithoutTables || textSource, {
+    enabled:
+      message.sender === "bot" &&
+      message.status !== "error" &&
+      (tables.length > 0 || charts.length > 0),
+    suggestions: structured?.suggestions,
+  });
 
   return {
     text,
     tables,
-    charts: structuredCharts.length > 0 ? structuredCharts : heuristicCharts,
+    charts,
     exports: dedupeExports(exports),
   };
 }
@@ -722,7 +828,7 @@ function hasInlineMarkdownTable(line: string): boolean {
   return /\|\s+\|\s*:?-{3,}/.test(line);
 }
 
-function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | null = null): ChartSpec | null {
+function chartFromTable(table: ParsedTable, requestedType: ChartKind | null = null): ChartSpec | null {
   if (table.rows.length < 2 || table.headers.length < 2) {
     return null;
   }
@@ -730,17 +836,17 @@ function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | n
   const headers = table.headers.filter((header) => header !== "#");
   const isSegmentComparison = isSmallSegmentComparisonTable(table, headers);
 
-  if (requestedType === "scatter" && !isSegmentComparison) {
-    return scatterChartFromTable(table, headers);
+  if ((requestedType === "scatter" || requestedType === "bubble") && !isSegmentComparison) {
+    return scatterChartFromTable(table, headers, requestedType === "bubble" ? "bubble" : "scatter");
   }
 
   const timeKey = selectTimeKey(headers);
-  if ((requestedType === "line" || timeKey) && timeKey) {
-    return lineChartFromTable(table, headers, timeKey);
+  if ((requestedType === "line" || requestedType === "area" || timeKey) && timeKey) {
+    return lineChartFromTable(table, headers, timeKey, requestedType === "area" ? "area" : "line");
   }
 
   const xKey = selectCategoryKey(headers, table.rows);
-  const yKeys = selectPrimaryMetricKeys(headers, table.rows, xKey).slice(
+  const yKeys = selectPlottableMetricKeys(headers, table.rows, xKey).slice(
     0,
     isSegmentComparison ? 1 : 2,
   );
@@ -770,10 +876,16 @@ function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | n
 
   const isTrend = /semana|week|fecha|date/i.test(xKey);
   const title = isTrend ? `Trend: ${yKeys.join(", ")}` : `Chart: ${yKeys.join(", ")} by ${xKey}`;
+  const type =
+    requestedType && ["area", "pie", "donut", "histogram", "combo"].includes(requestedType)
+      ? requestedType
+      : requestedType === "line" || isTrend
+        ? "line"
+        : "bar";
 
   return {
     id: createId("chart"),
-    type: requestedType === "line" || isTrend ? "line" : "bar",
+    type,
     title,
     xKey,
     yKeys,
@@ -781,8 +893,13 @@ function chartFromTable(table: ParsedTable, requestedType: ChartSpec["type"] | n
   };
 }
 
-function lineChartFromTable(table: ParsedTable, headers: string[], xKey: string): ChartSpec | null {
-  const yKey = selectPrimaryMetricKeys(headers, table.rows, xKey)[0];
+function lineChartFromTable(
+  table: ParsedTable,
+  headers: string[],
+  xKey: string,
+  type: Extract<ChartKind, "line" | "area"> = "line",
+): ChartSpec | null {
+  const yKey = selectPlottableMetricKeys(headers, table.rows, xKey)[0];
   if (!yKey) {
     return null;
   }
@@ -809,7 +926,7 @@ function lineChartFromTable(table: ParsedTable, headers: string[], xKey: string)
 
     return {
       id: createId("chart"),
-      type: "line",
+      type,
       title: `Trend: ${yKey}`,
       xKey,
       yKeys: [yKey],
@@ -848,7 +965,7 @@ function lineChartFromTable(table: ParsedTable, headers: string[], xKey: string)
 
   return {
     id: createId("chart"),
-    type: "line",
+    type,
     title: `Trend: ${yKey} by ${seriesKey}`,
     xKey,
     yKeys: seriesLabels,
@@ -856,7 +973,11 @@ function lineChartFromTable(table: ParsedTable, headers: string[], xKey: string)
   };
 }
 
-function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec | null {
+function scatterChartFromTable(
+  table: ParsedTable,
+  headers: string[],
+  type: Extract<ChartKind, "scatter" | "bubble"> = "scatter",
+): ChartSpec | null {
   const numericKeys = headers.filter((header) =>
     table.rows.some((row) => parseMetricValue(row[header]) !== null),
   );
@@ -869,6 +990,7 @@ function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec
   const yKey =
     selectPrimaryMetricKeys(numericKeys, table.rows, xKey)[0] ??
     numericKeys.find((key) => key !== xKey);
+  const zKey = type === "bubble" ? numericKeys.find((key) => key !== xKey && key !== yKey) : undefined;
 
   if (!yKey) {
     return null;
@@ -887,6 +1009,12 @@ function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec
         [xKey]: xValue,
         [yKey]: yValue,
       };
+      if (zKey) {
+        const zValue = parseMetricValue(row[zKey]);
+        if (zValue !== null) {
+          point[zKey] = zValue;
+        }
+      }
 
       if (labelKey) {
         point[labelKey] = stripMarkdown(row[labelKey] || "");
@@ -902,10 +1030,11 @@ function scatterChartFromTable(table: ParsedTable, headers: string[]): ChartSpec
 
   return {
     id: createId("chart"),
-    type: "scatter",
+    type,
     title: `Scatter: ${yKey} by ${xKey}`,
     xKey,
     yKeys: [yKey],
+    zKey,
     data,
   };
 }
@@ -944,6 +1073,23 @@ function selectPrimaryMetricKeys(
     .filter((header) => rows.some((row) => parseMetricValue(row[header]) !== null))
     .filter((header) => !isCountLikeKey(header) && !isMinMaxLikeKey(header))
     .filter((header) => !/variaci[oó]n|orders total|total órdenes/i.test(header))
+    .sort((left, right) => metricColumnPriority(left) - metricColumnPriority(right));
+}
+
+function selectPlottableMetricKeys(
+  headers: string[],
+  rows: Record<string, string>[],
+  xKey: string,
+): string[] {
+  const primary = selectPrimaryMetricKeys(headers, rows, xKey);
+  if (primary.length > 0) {
+    return primary;
+  }
+
+  return headers
+    .filter((header) => header !== xKey)
+    .filter((header) => rows.some((row) => parseMetricValue(row[header]) !== null))
+    .filter((header) => !isMinMaxLikeKey(header))
     .sort((left, right) => metricColumnPriority(left) - metricColumnPriority(right));
 }
 
@@ -1059,31 +1205,28 @@ function normalizeCharts(value: unknown): ChartSpec[] {
       return [];
     }
 
-    const data = Array.isArray(item.data) ? item.data.filter(isRecord) : [];
-    const xKey = firstString(item.xKey, item.x, item.category);
-    const yCandidate = item.yKeys ?? item.yKey ?? item.y ?? item.metric;
-    const yKeys = Array.isArray(yCandidate)
-      ? yCandidate.filter((key): key is string => typeof key === "string")
-      : typeof yCandidate === "string"
-        ? [yCandidate]
-        : [];
-    const type = normalizeChartType(item.type);
+    const rawType = firstString(item.type, item.kind, item.chartType, item.visualization);
+    const type = normalizeChartType(rawType);
+    const extracted = extractChartData(item, type);
 
-    if (!xKey || yKeys.length === 0 || data.length === 0) {
+    if (!extracted) {
       return [];
     }
 
-    const rows = data
-      .map((row) => normalizeChartRow(row, xKey, yKeys, type))
+    const rows = extracted.data
+      .map((row) => normalizeChartRow(row, extracted.xKey, extracted.yKeys, type, extracted.zKey))
       .filter((row) => {
-        if (type !== "scatter") {
+        if (!isNumericPointChart(type)) {
           return true;
         }
 
-        return typeof row[xKey] === "number" && typeof row[yKeys[0]] === "number";
+        return typeof row[extracted.xKey] === "number" && typeof row[extracted.yKeys[0]] === "number";
       });
+    const yKeys = extracted.yKeys.filter((key) =>
+      rows.some((row) => typeof row[key] === "number"),
+    );
 
-    if (rows.length === 0) {
+    if (rows.length === 0 || yKeys.length === 0) {
       return [];
     }
 
@@ -1091,24 +1234,343 @@ function normalizeCharts(value: unknown): ChartSpec[] {
       {
         id: `structured-chart-${index}`,
         type,
-        title: firstString(item.title) || "Chart",
-        xKey,
+        title: firstString(item.title, item.name, item.label) || defaultChartTitle(type),
+        xKey: extracted.xKey,
         yKeys,
+        zKey: extracted.zKey,
+        mode: normalizeChartMode(item, rawType),
         data: rows,
       },
     ];
   });
 }
 
+type ExtractedChartData = {
+  data: Record<string, unknown>[];
+  xKey: string;
+  yKeys: string[];
+  zKey?: string;
+};
+
+function extractChartData(item: Record<string, unknown>, type: ChartKind): ExtractedChartData | null {
+  const labelDatasetRows = extractLabelDatasetRows(item);
+  if (labelDatasetRows) {
+    return labelDatasetRows;
+  }
+
+  const labelValueRows = extractLabelValueRows(item);
+  if (labelValueRows) {
+    return labelValueRows;
+  }
+
+  const xyRows = extractXyRows(item);
+  if (xyRows) {
+    return xyRows;
+  }
+
+  const histogramRows = extractHistogramRows(item, type);
+  if (histogramRows) {
+    return histogramRows;
+  }
+
+  const rawRows = rawChartRows(item);
+  if (rawRows.length === 0) {
+    return null;
+  }
+
+  const xKey = firstString(item.xKey, item.x, item.category, item.nameKey, item.labelKey) || inferChartXKey(rawRows, type);
+  if (!xKey) {
+    return null;
+  }
+
+  let zKey = firstString(item.zKey, item.sizeKey, item.radiusKey);
+  let yKeys = explicitYKeys(item);
+  if (yKeys.length === 0) {
+    yKeys = inferChartYKeys(rawRows, xKey, zKey, type);
+  }
+  if (!zKey && type === "bubble") {
+    zKey = inferBubbleZKey(rawRows, xKey, yKeys[0]);
+  }
+
+  return yKeys.length > 0 ? { data: rawRows, xKey, yKeys, zKey } : null;
+}
+
+function extractLabelDatasetRows(item: Record<string, unknown>): ExtractedChartData | null {
+  for (const source of chartObjectSources(item)) {
+    const labels = arrayValue(source.labels) ?? arrayValue(source.categories);
+    const datasets = arrayValue(source.datasets) ?? arrayValue(source.series);
+    const datasetRecords = datasets?.filter(isRecord) ?? [];
+    if (!labels || labels.length === 0 || datasetRecords.length === 0) {
+      continue;
+    }
+
+    const xKey = firstString(item.xKey, item.x, item.category, item.nameKey, item.labelKey) || "label";
+    const rows = labels.map((label) => ({ [xKey]: label }));
+    const yKeys: string[] = [];
+
+    datasetRecords.forEach((dataset, datasetIndex) => {
+      const yKey =
+        firstString(dataset.label, dataset.name, dataset.key, dataset.metric, dataset.yKey) ||
+        `value_${datasetIndex + 1}`;
+      const values = arrayValue(dataset.data) ?? arrayValue(dataset.values);
+      if (!values || values.length === 0) {
+        return;
+      }
+
+      yKeys.push(yKey);
+      values.forEach((value, valueIndex) => {
+        if (rows[valueIndex]) {
+          rows[valueIndex][yKey] = chartPointValue(value, yKey);
+        }
+      });
+    });
+
+    if (yKeys.length > 0) {
+      return { data: rows, xKey, yKeys };
+    }
+  }
+
+  return null;
+}
+
+function extractLabelValueRows(item: Record<string, unknown>): ExtractedChartData | null {
+  for (const source of chartObjectSources(item)) {
+    const labels = arrayValue(source.labels) ?? arrayValue(source.categories);
+    const values = arrayValue(source.values) ?? arrayValue(source.y);
+    if (!labels || !values || labels.length === 0 || values.length === 0) {
+      continue;
+    }
+
+    const xKey = firstString(item.xKey, item.x, item.category, item.nameKey, item.labelKey) || "label";
+    const yKey = firstString(item.yKey, item.metric, item.valueKey) || "value";
+    const rows = labels.map((label, index) => ({
+      [xKey]: label,
+      [yKey]: chartPointValue(values[index], yKey),
+    }));
+    return { data: rows, xKey, yKeys: [yKey] };
+  }
+
+  return null;
+}
+
+function extractXyRows(item: Record<string, unknown>): ExtractedChartData | null {
+  const xValues = arrayValue(item.x);
+  const yValues = arrayValue(item.y);
+  if (!xValues || !yValues || xValues.length === 0 || yValues.length === 0) {
+    return null;
+  }
+
+  const xKey = firstString(item.xKey, item.category, item.nameKey, item.labelKey) || "x";
+  const yKey = firstString(item.yKey, item.metric, item.valueKey) || "y";
+  const rows = xValues.map((xValue, index) => ({
+    [xKey]: xValue,
+    [yKey]: chartPointValue(yValues[index], yKey),
+  }));
+
+  return { data: rows, xKey, yKeys: [yKey] };
+}
+
+function extractHistogramRows(item: Record<string, unknown>, type: ChartKind): ExtractedChartData | null {
+  if (type !== "histogram") {
+    return null;
+  }
+
+  const rawValues = arrayValue(item.values) ?? arrayValue(item.data);
+  const values = (rawValues ?? [])
+    .map((value) => parseMetricValue(value))
+    .filter((value): value is number => value !== null);
+  if (values.length < 2) {
+    return null;
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (min === max) {
+    return {
+      data: [{ bin: String(min), count: values.length }],
+      xKey: "bin",
+      yKeys: ["count"],
+    };
+  }
+
+  const binCount = Math.min(10, Math.max(4, Math.ceil(Math.sqrt(values.length))));
+  const width = (max - min) / binCount;
+  const bins = Array.from({ length: binCount }, (_, index) => ({
+    start: min + index * width,
+    end: index === binCount - 1 ? max : min + (index + 1) * width,
+    count: 0,
+  }));
+
+  values.forEach((value) => {
+    const index = Math.min(binCount - 1, Math.floor((value - min) / width));
+    bins[index].count += 1;
+  });
+
+  return {
+    data: bins.map((bin) => ({
+      bin: `${formatCompactNumber(bin.start)}-${formatCompactNumber(bin.end)}`,
+      count: bin.count,
+    })),
+    xKey: "bin",
+    yKeys: ["count"],
+  };
+}
+
+function rawChartRows(item: Record<string, unknown>): Record<string, unknown>[] {
+  const data = arrayValue(item.data);
+  if (data) {
+    const rows = data.filter(isRecord);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+
+  const points = arrayValue(item.points);
+  return points?.filter(isRecord) ?? [];
+}
+
+function chartObjectSources(item: Record<string, unknown>): Record<string, unknown>[] {
+  const sources: Record<string, unknown>[] = [item];
+  if (isRecord(item.data)) {
+    sources.push(item.data);
+  }
+  if (isRecord(item.chartjs) && isRecord(item.chartjs.data)) {
+    sources.push(item.chartjs.data);
+  }
+  return sources;
+}
+
+function explicitYKeys(item: Record<string, unknown>): string[] {
+  const candidate = item.yKeys ?? item.yKey ?? item.metric ?? item.valueKey;
+  if (Array.isArray(candidate)) {
+    return candidate.filter((key): key is string => typeof key === "string" && key.trim().length > 0);
+  }
+  if (typeof candidate === "string" && candidate.trim()) {
+    return [candidate.trim()];
+  }
+  if (typeof item.y === "string" && item.y.trim()) {
+    return [item.y.trim()];
+  }
+  return [];
+}
+
+function inferChartXKey(rows: Record<string, unknown>[], type: ChartKind): string | null {
+  const keys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+  if (keys.length === 0) {
+    return null;
+  }
+
+  const preferred =
+    type === "scatter" || type === "bubble"
+      ? ["x"]
+      : ["label", "name", "category", "x", "week_label", "week", "date", "zone", "city", "country"];
+  for (const key of preferred) {
+    const match = keys.find((candidate) => candidate.toLowerCase() === key);
+    if (match) {
+      return match;
+    }
+  }
+
+  return keys.find((key) => rows.some((row) => parseMetricValue(row[key]) === null)) ?? keys[0];
+}
+
+function inferChartYKeys(
+  rows: Record<string, unknown>[],
+  xKey: string,
+  zKey: string | undefined,
+  type: ChartKind,
+): string[] {
+  const numericKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
+    .filter((key) => key !== xKey && key !== zKey)
+    .filter((key) => rows.some((row) => parseMetricValue(row[key]) !== null));
+
+  if ((type === "scatter" || type === "bubble") && numericKeys.includes("y")) {
+    return ["y"];
+  }
+  if (numericKeys.includes("value")) {
+    return ["value"];
+  }
+  return numericKeys.slice(0, type === "line" || type === "area" || type === "combo" ? 8 : 4);
+}
+
+function inferBubbleZKey(
+  rows: Record<string, unknown>[],
+  xKey: string,
+  yKey: string | undefined,
+): string | undefined {
+  const preferred = ["z", "size", "radius", "volume", "count", "n", "orders"];
+  const numericKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
+    .filter((key) => key !== xKey && key !== yKey)
+    .filter((key) => rows.some((row) => parseMetricValue(row[key]) !== null));
+  for (const key of preferred) {
+    const match = numericKeys.find((candidate) => candidate.toLowerCase() === key);
+    if (match) {
+      return match;
+    }
+  }
+  return numericKeys[0];
+}
+
+function chartPointValue(value: unknown, key: string): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  return value[key] ?? value.y ?? value.value ?? value.count ?? value.total ?? value.x ?? "";
+}
+
+function arrayValue(value: unknown): unknown[] | null {
+  return Array.isArray(value) ? value : null;
+}
+
+function isNumericPointChart(type: ChartKind): boolean {
+  return type === "scatter" || type === "bubble";
+}
+
+function normalizeChartMode(item: Record<string, unknown>, rawType?: string): ChartMode | undefined {
+  const text = `${rawType ?? ""} ${firstString(item.mode, item.variant, item.layout) ?? ""}`
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+  if (item.stacked === true || /\bstack(?:ed)?\b/.test(text)) {
+    return "stacked";
+  }
+  if (/\bgroup(?:ed)?\b/.test(text)) {
+    return "grouped";
+  }
+  return undefined;
+}
+
+function normalizeSuggestions(value: unknown): string[] {
+  const rawSuggestions = Array.isArray(value) ? value : value ? [value] : [];
+
+  return rawSuggestions
+    .flatMap((item) => {
+      if (typeof item !== "string") {
+        return [];
+      }
+
+      return item
+        .split(/\n|(?=\s*[1-3][.)]\s+)/)
+        .map((suggestion) =>
+          suggestion
+            .replace(/^\s*(?:[-*]|\d+[.)])\s*/, "")
+            .trim(),
+        )
+        .filter(Boolean);
+    })
+    .slice(0, 3);
+}
+
 function normalizeChartRow(
   row: Record<string, unknown>,
   xKey: string,
   yKeys: string[],
-  type: ChartSpec["type"],
+  type: ChartKind,
+  zKey?: string,
 ) {
   const parsedX = parseMetricValue(row[xKey]);
   const normalized: Record<string, string | number> = {
-    [xKey]: type === "scatter" && parsedX !== null ? parsedX : String(row[xKey] ?? ""),
+    [xKey]: isNumericPointChart(type) && parsedX !== null ? parsedX : String(row[xKey] ?? ""),
   };
 
   yKeys.forEach((key) => {
@@ -1117,40 +1579,103 @@ function normalizeChartRow(
       normalized[key] = parsed;
     }
   });
+  if (zKey) {
+    const parsed = parseMetricValue(row[zKey]);
+    if (parsed !== null) {
+      normalized[zKey] = parsed;
+    }
+  }
 
   return normalized;
 }
 
-function inferRequestedChartType(text: string): ChartSpec["type"] | null {
-  if (/\b(scatter|dispersi[oó]n|bubble|burbuja)\b/i.test(text)) {
+function inferRequestedChartType(text: string): ChartKind | null {
+  if (/\b(bubble|burbuja)\b/i.test(text)) {
+    return "bubble";
+  }
+
+  if (/\b(scatter|dispersi[oó]n)\b/i.test(text)) {
     return "scatter";
   }
 
-  if (/\b(line|l[ií]nea|trend|tendencia|area|time series|serie temporal|evoluci[oó]n)\b/i.test(text)) {
+  if (/\b(area|área)\b/i.test(text)) {
+    return "area";
+  }
+
+  if (/\b(line|l[ií]nea|trend|tendencia|time series|serie temporal|evoluci[oó]n)\b/i.test(text)) {
     return "line";
   }
 
-  if (/\b(bar|barra|column|columna|histogram|histograma|pie|donut|dona)\b/i.test(text)) {
+  if (/\b(pie|pastel|torta)\b/i.test(text)) {
+    return "pie";
+  }
+
+  if (/\b(donut|doughnut|dona)\b/i.test(text)) {
+    return "donut";
+  }
+
+  if (/\b(histogram|histograma|distribution|distribuci[oó]n)\b/i.test(text)) {
+    return "histogram";
+  }
+
+  if (/\b(combo|combined|combinad[ao]|mixed|mixt[ao])\b/i.test(text)) {
+    return "combo";
+  }
+
+  if (/\b(bar|barra|column|columna)\b/i.test(text)) {
     return "bar";
   }
 
   return null;
 }
 
-function normalizeChartType(value: unknown): ChartSpec["type"] {
+function normalizeChartType(value: unknown): ChartKind {
   if (typeof value !== "string") {
     return "bar";
   }
 
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "scatter" || normalized === "bubble") {
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["scatter", "scatterplot", "scatter_plot", "dispersion", "dispersion_plot"].includes(normalized)) {
     return "scatter";
   }
-  if (normalized === "line" || normalized === "area" || normalized === "trend") {
+  if (["bubble", "bubble_chart"].includes(normalized)) {
+    return "bubble";
+  }
+  if (["line", "line_chart", "trend", "timeseries", "time_series"].includes(normalized)) {
     return "line";
+  }
+  if (["area", "area_chart", "stacked_area"].includes(normalized)) {
+    return "area";
+  }
+  if (["pie", "pie_chart"].includes(normalized)) {
+    return "pie";
+  }
+  if (["donut", "doughnut", "donut_chart", "doughnut_chart"].includes(normalized)) {
+    return "donut";
+  }
+  if (["histogram", "histograma", "distribution"].includes(normalized)) {
+    return "histogram";
+  }
+  if (["combo", "combined", "composed", "mixed", "dual_axis"].includes(normalized)) {
+    return "combo";
   }
 
   return "bar";
+}
+
+function defaultChartTitle(type: ChartKind): string {
+  const titles: Record<ChartKind, string> = {
+    area: "Area chart",
+    bar: "Bar chart",
+    bubble: "Bubble chart",
+    combo: "Combo chart",
+    donut: "Donut chart",
+    histogram: "Histogram",
+    line: "Line chart",
+    pie: "Pie chart",
+    scatter: "Scatter chart",
+  };
+  return titles[type];
 }
 
 function isCountLikeKey(key: string): boolean {
@@ -1186,7 +1711,10 @@ function normalizeExports(value: unknown): ExportLink[] {
       {
         href,
         kind,
-        label: firstString(item.label, item.name) || labelForKind(kind),
+        label:
+          kind === "file"
+            ? firstString(item.label, item.name) || labelForKind(kind)
+            : labelForKind(kind),
       },
     ];
   });
@@ -1380,11 +1908,90 @@ function splitTextBlocks(text: string) {
 }
 
 function cleanDisplayText(text: string): string {
-  return text
+  const cleaned = text
     .split(/\r?\n/)
     .map((line) => line.replace(/<\/?div[^>]*>/gi, "").trim())
     .filter((line) => line && !/^<\/?[a-z][^>]*>$/i.test(line))
     .join("\n");
+
+  return normalizeSuggestionMarkdown(cleaned);
+}
+
+function ensureSuggestionSection(
+  text: string,
+  options: { enabled: boolean; suggestions?: string[] },
+): string {
+  const normalizedText = normalizeSuggestionMarkdown(text);
+
+  if (!options.enabled || hasSuggestionSection(normalizedText)) {
+    return normalizedText;
+  }
+
+  const heading = isSpanishText(normalizedText) ? "Sugerencias" : "Suggestions";
+  const suggestions =
+    options.suggestions && options.suggestions.length > 0
+      ? options.suggestions
+      : defaultSuggestions(heading);
+  const suggestionBlock = suggestions
+    .slice(0, 3)
+    .map((suggestion, index) => `${index + 1}. ${suggestion}`)
+    .join("\n");
+
+  return [normalizedText.trimEnd(), `### ${heading}\n${suggestionBlock}`]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function hasSuggestionSection(text: string): boolean {
+  return /(?:^|\n)#{1,4}\s+(?:Sugerencias|Suggestions)\b/i.test(text);
+}
+
+function defaultSuggestions(heading: "Sugerencias" | "Suggestions"): string[] {
+  if (heading === "Sugerencias") {
+    return [
+      "Ver la tendencia de este resultado en las ultimas 8 semanas.",
+      "Comparar el resultado por pais, ciudad o tipo de zona.",
+      "Exportar este resultado a CSV o PDF.",
+    ];
+  }
+
+  return [
+    "View this result as an 8-week trend.",
+    "Compare the result by country, city, or zone type.",
+    "Export this result to CSV or PDF.",
+  ];
+}
+
+function isSpanishText(text: string): boolean {
+  return /\b(las|los|zonas|semana|actual|mexico|colombia|argentina|pais|exportar|comparar|tendencia|ultimas|outliers)\b/i.test(
+    stripAccents(text),
+  );
+}
+
+function stripAccents(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeSuggestionMarkdown(text: string): string {
+  const marker = /\b(Sugerencias|Suggestions):\s*/i.exec(text);
+  if (!marker) {
+    return text;
+  }
+
+  const before = text.slice(0, marker.index).trimEnd();
+  const heading = marker[1].toLowerCase().startsWith("suger")
+    ? "Sugerencias"
+    : "Suggestions";
+  const remainder = text.slice(marker.index + marker[0].length).trim();
+  const items = Array.from(
+    remainder.matchAll(/(?:^|\s)([1-3])[.)]\s+([\s\S]*?)(?=\s[1-3][.)]\s+|$)/g),
+  ).map((match) => `${match[1]}. ${match[2].trim()}`);
+
+  if (items.length < 2) {
+    return text;
+  }
+
+  return [before, `### ${heading}\n${items.join("\n")}`].filter(Boolean).join("\n\n");
 }
 
 function isMarkdownTableRow(line = ""): boolean {
@@ -1437,6 +2044,19 @@ function parseMetricValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function formatCompactNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+  if (Math.abs(value) >= 1000) {
+    return value.toLocaleString("en", { maximumFractionDigits: 0 });
+  }
+  if (Math.abs(value) >= 10) {
+    return value.toLocaleString("en", { maximumFractionDigits: 1 });
+  }
+  return value.toLocaleString("en", { maximumFractionDigits: 2 });
+}
+
 function tryParseJson(value: unknown): unknown | null {
   if (typeof value !== "string") {
     return null;
@@ -1452,6 +2072,79 @@ function tryParseJson(value: unknown): unknown | null {
 function extractFencedJson(text: string): unknown | null {
   const match = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
   return match ? tryParseJson(match[1]) : null;
+}
+
+function extractEmbeddedJsonObjects(text: string): Record<string, unknown>[] {
+  const objects: Record<string, unknown>[] = [];
+
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== "{") {
+      continue;
+    }
+
+    const end = findJsonObjectEnd(text, index);
+    if (end === -1) {
+      continue;
+    }
+
+    const parsed = tryParseJson(text.slice(index, end + 1));
+    if (isRecord(parsed)) {
+      objects.push(parsed);
+      index = end;
+    }
+  }
+
+  return objects.sort((left, right) => structuredCandidateScore(right) - structuredCandidateScore(left));
+}
+
+function findJsonObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+
+  return -1;
+}
+
+function structuredCandidateScore(candidate: Record<string, unknown>): number {
+  let score = 0;
+  if ("answer" in candidate) score += 8;
+  if ("tables" in candidate || "table" in candidate || "rows" in candidate) score += 4;
+  if ("charts" in candidate || "chart" in candidate) score += 3;
+  if ("exports" in candidate || "exportLinks" in candidate || "files" in candidate) score += 2;
+  if ("suggestions" in candidate || "suggested_followups" in candidate) score += 1;
+  return score;
 }
 
 function firstString(...values: unknown[]): string | undefined {
